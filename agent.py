@@ -6,6 +6,8 @@ os.environ['SSL_CERT_FILE'] = certifi.where()
 
 import logging
 import json
+import asyncio
+import httpx
 from dotenv import load_dotenv
 
 from livekit import agents, api
@@ -38,6 +40,11 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
     """Configure the Text-to-Speech provider based on env vars or dynamic config."""
     # Priority: Config > Env Var > Default
     provider = (config_provider or os.getenv("TTS_PROVIDER", config.DEFAULT_TTS_PROVIDER)).lower()
+    print(f"\n==============================================")
+    print(f"DEBUG: TTS_PROVIDER selected is -> {provider}")
+    print(f"DEBUG: Voice ID requested is -> {config_voice}")
+    print(f"DEBUG: OPENAI_API_KEY present? -> {'Yes' if os.getenv('OPENAI_API_KEY') else 'No'}")
+    print(f"==============================================\n")
     
     # If using Sarvam Voice names (Anushka/Aravind), force Sarvam provider
     if config_voice in ["anushka", "aravind", "amartya", "dhruv"]:
@@ -53,7 +60,9 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
         logger.info(f"Using Sarvam TTS (Voice: {config_voice})")
         model = os.getenv("SARVAM_TTS_MODEL", config.SARVAM_MODEL)
         # Use dynamic voice or env var or default
-        voice = config_voice or os.getenv("SARVAM_VOICE", "anushka")
+        # Ignore OpenAI specific voices
+        valid_sarvam_voices = ["shubh", "ritu", "rahul", "pooja", "simran", "kavya", "amit", "ratan", "rohan", "dev", "ishita", "shreya", "manan", "sumit", "priya", "aditya", "kabir", "neha", "varun", "roopa", "aayan", "ashutosh", "advait", "amelia", "sophia", "anushka", "aravind"]
+        voice = config_voice if config_voice in valid_sarvam_voices else os.getenv("SARVAM_VOICE", "amit")
         language = os.getenv("SARVAM_LANGUAGE", config.SARVAM_LANGUAGE)
         return sarvam.TTS(model=model, speaker=voice, target_language_code=language)
 
@@ -89,10 +98,55 @@ def _build_llm(config_provider: str = None):
 
 
 class TransferFunctions(llm.ToolContext):
-    def __init__(self, ctx: agents.JobContext, phone_number: str = None):
+    def __init__(self, ctx: agents.JobContext, phone_number: str = None, dashboard_url: str = None, lead_id: str = None):
         super().__init__(tools=[])
         self.ctx = ctx
         self.phone_number = phone_number
+        self.dashboard_url = dashboard_url
+        self.lead_id = lead_id
+
+    @llm.function_tool(description="End the call. Use this when the customer says they are not interested, they already have a website, or they just want to hang up.")
+    async def not_interested(self):
+        logger.info("Customer not interested. Ending call.")
+        self.call_ended_by_tool = True
+        if self.dashboard_url and self.lead_id:
+            try:
+                # Fire and forget dashboard update
+                asyncio.ensure_future(_notify_dashboard(self.dashboard_url, self.lead_id, "not_confirmed"))
+            except Exception as e:
+                logger.error(f"Error in notify: {e}")
+                
+        # Drop the call
+        async def _delayed_shutdown():
+            await asyncio.sleep(8) # Give agent time to say bye
+            self.ctx.shutdown()
+            
+        asyncio.ensure_future(_delayed_shutdown())
+        return "Call ending sequence initiated. EXACTLY say: 'Thank you, aapka din shubh ho.' and then wait."
+
+    @llm.function_tool(description="Confirm demo and record the verified 10-digit WhatsApp number. ONLY call this AFTER the user has explicitly provided/confirmed a 10-digit WhatsApp number and agreed to the demo.")
+    async def confirm_demo(self, whatsapp_number: str):
+        logger.info(f"Demo confirmed. WhatsApp Number: {whatsapp_number}")
+        self.call_ended_by_tool = True
+        if self.dashboard_url and self.lead_id:
+            try:
+                # Dashboard update
+                async def _update_demo():
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        url = f"{self.dashboard_url}/api/leads/{self.lead_id}"
+                        payload = {"status": "demo_confirmed", "whatsapp_number": whatsapp_number}
+                        await client.patch(url, json=payload)
+                asyncio.ensure_future(_update_demo())
+            except Exception as e:
+                logger.error(f"Failed to notify dashboard of demo confirmation: {e}")
+        
+        # End call after confirming
+        async def _delayed_shutdown():
+            await asyncio.sleep(8) # Let agent say thank you
+            self.ctx.shutdown()
+            
+        asyncio.ensure_future(_delayed_shutdown())
+        return "Demo confirmed successfully. EXACTLY say: 'Thank you, main aapko WhatsApp par demo bhej raha hoon. Aapka din shubh ho.' and then wait."
 
     @llm.function_tool(description="Look up user details by phone number.")
     def lookup_user(self, phone: str):
@@ -177,6 +231,24 @@ class OutboundAssistant(Agent):
 
 
 
+async def _notify_dashboard(dashboard_url: str, lead_id: str, status: str, duration: int = 0):
+    """Notify the dashboard that a call has ended and update lead status."""
+    if not dashboard_url or not lead_id:
+        logger.warning(f"Cannot notify dashboard: url={dashboard_url}, lead_id={lead_id}")
+        return
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Update lead status
+            url = f"{dashboard_url}/api/leads/{lead_id}"
+            payload = {"status": status}
+            logger.info(f"Notifying dashboard: {url} -> {status}")
+            resp = await client.patch(url, json=payload)
+            logger.info(f"Dashboard response: {resp.status_code}")
+    except Exception as e:
+        logger.error(f"Failed to notify dashboard: {e}")
+
+
 async def entrypoint(ctx: agents.JobContext):
     """
     Main entrypoint for the agent.
@@ -191,13 +263,18 @@ async def entrypoint(ctx: agents.JobContext):
     
     # parse the phone number AND config from the metadata
     phone_number = None
+    lead_id = None
+    dashboard_url = "http://localhost:3000"
     config_dict = {}
+    call_answered = False
     
     # Check Job Metadata (Legacy/Dispatch)
     try:
         if ctx.job.metadata:
             data = json.loads(ctx.job.metadata)
             phone_number = data.get("phone_number")
+            lead_id = data.get("lead_id")
+            dashboard_url = data.get("dashboard_url", dashboard_url)
             config_dict = data
     except Exception:
         pass
@@ -208,35 +285,66 @@ async def entrypoint(ctx: agents.JobContext):
             data = json.loads(ctx.room.metadata)
             if data.get("phone_number"):
                 phone_number = data.get("phone_number")
+            if data.get("lead_id"):
+                lead_id = data.get("lead_id")
+            if data.get("dashboard_url"):
+                dashboard_url = data.get("dashboard_url")
             config_dict.update(data) # Merge configs
     except Exception:
         logger.warning("No valid JSON metadata found in Room.")
+    
+    logger.info(f"Call config: phone={phone_number}, lead_id={lead_id}, dashboard={dashboard_url}")
 
     # Initialize function context
-    fnc_ctx = TransferFunctions(ctx, phone_number)
+    fnc_ctx = TransferFunctions(ctx, phone_number, dashboard_url, lead_id)
+
+    # Resilient configuration fetching
+    m_provider = config_dict.get("model_provider") or os.getenv("LLM_PROVIDER") or config.DEFAULT_LLM_PROVIDER
+    tts_provider = config_dict.get("tts_provider") or os.getenv("TTS_PROVIDER") or config.DEFAULT_TTS_PROVIDER
+    m_voice = config_dict.get("voice_id") or os.getenv("OPENAI_TTS_VOICE") or config.DEFAULT_TTS_VOICE
+    
+    print(f"--- BOOM: Initializing with LLM Provider: {m_provider}, TTS Provider: {tts_provider}, Voice: {m_voice} ---")
 
     # Initialize the Agent Session with plugins
-    session = AgentSession(
-        vad=silero.VAD.load(),
-        stt=deepgram.STT(model=config.STT_MODEL, language=config.STT_LANGUAGE), 
-        llm=_build_llm(config_dict.get("model_provider")),
-        tts=_build_tts(config_dict.get("model_provider"), config_dict.get("voice_id")),
-    )
+    try:
+        session = AgentSession(
+            vad=silero.VAD.load(min_silence_duration=0.3, min_speech_duration=0.1),
+            stt=deepgram.STT(model=config.STT_MODEL, language=config.STT_LANGUAGE, interim_results=True), 
+            llm=_build_llm(m_provider),
+            tts=_build_tts(tts_provider, m_voice),
+        )
+        print("--- BOOM: Session Object Created ---")
+    except Exception as e:
+        print(f"--- BOOM CRITICAL ERROR: Session Init Failed: {e} ---")
+        # Extreme fallback to OpenAI defaults
+        session = AgentSession(
+            vad=silero.VAD.load(min_silence_duration=0.3),
+            stt=deepgram.STT(model="nova-2", language="hi"),
+            llm=openai.LLM(),
+            tts=openai.TTS(),
+        )
 
     # Start the session
+    print("--- BOOM: Starting Session ---")
     await session.start(
         room=ctx.room,
         agent=OutboundAssistant(tools=list(fnc_ctx.function_tools.values())),
-        room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVCTelephony(),
-            close_on_disconnect=True, # Close room when agent disconnects
-        ),
     )
+    print("--- BOOM: Session Started Successfully ---")
 
-    # Logic to dial out:
-    # 1. If 'phone_number' is present, we MIGHT need to dial.
-    # 2. Check if a SIP participant is already in the room (Dashboard dispatch case).
-    
+    # Listen for transcript events for debugging
+    @session.on("user_speech_committed")
+    def on_user_speech(msg: llm.ChatMessage):
+        if msg.content:
+            logger.info(f"USER: {msg.content}")
+            print(f"\n--- BOOM USER SAID: {msg.content} ---")
+
+    @session.on("agent_speech_committed")
+    def on_agent_speech(msg: llm.ChatMessage):
+        if msg.content:
+            logger.info(f"AGENT: {msg.content}")
+            print(f"--- BOOM AGENT SAID: {msg.content} ---\n")
+
     should_dial = False
     if phone_number:
         # Check if any remote participant looks like our user (sip_PHONE)
@@ -253,42 +361,89 @@ async def entrypoint(ctx: agents.JobContext):
             logger.info("User already in room (Dashboard dispatched). output Only generated greeting.")
 
     if should_dial:
-        logger.info(f"Initiating outbound SIP call to {phone_number}...")
+        # Clean phone number: remove spaces, dashes, and ensure only digits
+        dial_number = "".join(filter(str.isdigit, phone_number))
+        
+        print(f"[TRACE] Dialing {dial_number} on trunk {config.SIP_TRUNK_ID}")
         try:
-            # Create a SIP participant to dial out
-            # This effectively "calls" the phone number and brings them into this room
-            # --- CONNECTING TO THE PHONE NETWORK ---
-            # This step actually "dials" the number using Vobiz (SIP Trunk).
-            # It invites the phone number into this digital room.
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
                     sip_trunk_id=config.SIP_TRUNK_ID,
-                    sip_call_to=phone_number,
-                    participant_identity=f"sip_{phone_number}", # Unique ID for the SIP user
-                    wait_until_answered=True, # Important: Wait for pickup before continuing
+                    sip_call_to=dial_number,
+                    participant_identity=f"sip_{dial_number}",
+                    wait_until_answered=True,
                 )
             )
-            logger.info("Call answered! Agent is now listening.")
+            print("[TRACE] Call picked up or ringing ended!")
+            call_answered = True
             
-            # Note: We do NOT generate an initial reply here immediately.
-            # Usually for outbound, we want to hear "Hello?" from the user first,
-            # OR we can speak immediately. 
-            # If you want the agent to speak first, uncomment the lines below:
+            # Wait for the participant to actually appear in the room
+            print("[TRACE] Waiting for participant to appear in Room context...")
+            for _ in range(20):
+                if any(f"sip_{dial_number}" in p.identity for p in ctx.room.remote_participants.values()):
+                    print("[TRACE] Participant fully joined the Room!")
+                    break
+                print("[TRACE] Still waiting for SIP participant object...")
+                await asyncio.sleep(0.5)
             
-            await session.generate_reply(
-                instructions=config.INITIAL_GREETING
-            )
+            # --- CALL END DETECTION ---
+            # Listen for participant disconnect to update dashboard
+            @ctx.room.on("participant_disconnected")
+            def on_participant_left(participant):
+                if "sip_" in participant.identity:
+                    logger.info(f"SIP participant {participant.identity} disconnected - call ended")
+                    print(f"--- BOOM: Call ended, participant {participant.identity} left ---")
+                    # Schedule the dashboard notification only if we didn't explicitly end it via a tool
+                    if not getattr(fnc_ctx, 'call_ended_by_tool', False):
+                        asyncio.ensure_future(
+                            _notify_dashboard(dashboard_url, lead_id, "not_confirmed")
+                        )
+                    # Shutdown after a short delay to let notification go through
+                    async def _delayed_shutdown():
+                        await asyncio.sleep(2)
+                        ctx.shutdown()
+                    asyncio.ensure_future(_delayed_shutdown())
+            
+            print("[TRACE] Sleeping 2.0s to let SIP audio channel initialize...")
+            await asyncio.sleep(2.0)
+            try:
+                if hasattr(session, "say"):
+                    print(f"[TRACE] Calling session.say() with allow_interruptions=False")
+                    # Set allow_interruptions to False so background noise doesn't immediately cut it off!
+                    if asyncio.iscoroutinefunction(session.say):
+                        await session.say(config.INITIAL_GREETING, allow_interruptions=False)
+                    else:
+                        session.say(config.INITIAL_GREETING, allow_interruptions=False)
+                    print("[TRACE] session.say() executed successfully.")
+                elif hasattr(session, "generate_reply"):
+                    print("--- BOOM: Calling session.generate_reply() ---")
+                    if asyncio.iscoroutinefunction(session.generate_reply):
+                        await session.generate_reply(instructions=config.INITIAL_GREETING)
+                    else:
+                        session.generate_reply(instructions=config.INITIAL_GREETING)
+                else:
+                    print("--- BOOM: Pushing system message to LLM ---")
+                    session.push_message(llm.ChatMessage(role="system", content=f"Call started. Greet the user now: {config.INITIAL_GREETING}"))
+            except Exception as e:
+                import traceback
+                print(f"--- BOOM ERROR IN GREETING: {e} ---")
+                traceback.print_exc()
+            
+            print("--- BOOM: Greet logic finished ---")
             
         except Exception as e:
             logger.error(f"Failed to place outbound call: {e}")
-            # Ensure we clean up if the call fails
+            # Call failed - update status to no_answer
+            await _notify_dashboard(dashboard_url, lead_id, "no_answer")
             ctx.shutdown()
     else:
         # Fallback for inbound calls (if this agent is used for that) OR Dashboard calls where user is already there
         logger.info("Detecting if we should greet...")
-        # Give a small delay for audio to stabilize if user just joined
-        await session.generate_reply(instructions=config.fallback_greeting)
+        if asyncio.iscoroutinefunction(session.generate_reply):
+            await session.generate_reply(instructions=config.fallback_greeting)
+        else:
+            session.generate_reply(instructions=config.fallback_greeting)
 
 
 if __name__ == "__main__":

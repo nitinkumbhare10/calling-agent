@@ -48,13 +48,13 @@ async def main():
         
         trunk = await lkapi.sip.create_outbound_trunk(request)
         
-        print("\n✅ SIP Trunk Created Successfully!")
+        print("\n[OK] SIP Trunk Created Successfully!")
         print(f"Trunk ID: {trunk.sip_trunk_id}")
         print(f"Name: {trunk.name}")
         print(f"Numbers: {trunk.numbers}")
         
     except Exception as e:
-        print(f"\n❌ Error creating trunk: {e}")
+        print(f"\n[ERROR] Error creating trunk: {e}")
     finally:
         await lkapi.aclose()
 

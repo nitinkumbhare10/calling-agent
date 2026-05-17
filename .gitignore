@@ -25,3 +25,6 @@ yarn-error.log*
 # IDE settings
 .vscode/
 .idea/
+trace_log*.txt
+agent_debug.log
+agent_session_dir.txt
