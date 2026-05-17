@@ -446,7 +446,32 @@ async def entrypoint(ctx: agents.JobContext):
             session.generate_reply(instructions=config.fallback_greeting)
 
 
+import threading
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+
+def run_dummy_server():
+    class DummyHandler(SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"LiveKit Agent is running and active!")
+            
+        def log_message(self, format, *args):
+            # Suppress logs to avoid cluttering agent logs
+            pass
+
+    port = int(os.getenv("PORT", "8080"))
+    server = HTTPServer(("0.0.0.0", port), DummyHandler)
+    logger.info(f"Starting dummy HTTP server on port {port} for Render keep-alive...")
+    server.serve_forever()
+
+
 if __name__ == "__main__":
+    # Start dummy web server in a background thread
+    t = threading.Thread(target=run_dummy_server, daemon=True)
+    t.start()
+
     # The agent name "outbound-caller" is used by the dispatch script to find this worker
     agents.cli.run_app(
         agents.WorkerOptions(
