@@ -118,7 +118,7 @@ class TransferFunctions(llm.ToolContext):
                 
         # Drop the call
         async def _delayed_shutdown():
-            await asyncio.sleep(8) # Give agent time to say bye
+            await asyncio.sleep(4) # Give agent time to say bye
             self.ctx.shutdown()
             
         asyncio.ensure_future(_delayed_shutdown())
@@ -142,7 +142,7 @@ class TransferFunctions(llm.ToolContext):
         
         # End call after confirming
         async def _delayed_shutdown():
-            await asyncio.sleep(8) # Let agent say thank you
+            await asyncio.sleep(4) # Let agent say thank you
             self.ctx.shutdown()
             
         asyncio.ensure_future(_delayed_shutdown())
@@ -222,9 +222,9 @@ class OutboundAssistant(Agent):
     An AI agent tailored for outbound calls.
     Attempts to be helpful and concise.
     """
-    def __init__(self, tools: list) -> None:
+    def __init__(self, tools: list, instructions: str) -> None:
         super().__init__(
-            instructions=config.SYSTEM_PROMPT,
+            instructions=instructions,
             tools=tools,
         )
 
@@ -264,6 +264,7 @@ async def entrypoint(ctx: agents.JobContext):
     # parse the phone number AND config from the metadata
     phone_number = None
     lead_id = None
+    business_name = None
     dashboard_url = "http://localhost:3000"
     config_dict = {}
     call_answered = False
@@ -274,6 +275,7 @@ async def entrypoint(ctx: agents.JobContext):
             data = json.loads(ctx.job.metadata)
             phone_number = data.get("phone_number")
             lead_id = data.get("lead_id")
+            business_name = data.get("business_name")
             dashboard_url = data.get("dashboard_url", dashboard_url)
             config_dict = data
     except Exception:
@@ -287,13 +289,15 @@ async def entrypoint(ctx: agents.JobContext):
                 phone_number = data.get("phone_number")
             if data.get("lead_id"):
                 lead_id = data.get("lead_id")
+            if data.get("business_name"):
+                business_name = data.get("business_name")
             if data.get("dashboard_url"):
                 dashboard_url = data.get("dashboard_url")
             config_dict.update(data) # Merge configs
     except Exception:
         logger.warning("No valid JSON metadata found in Room.")
     
-    logger.info(f"Call config: phone={phone_number}, lead_id={lead_id}, dashboard={dashboard_url}")
+    logger.info(f"Call config: phone={phone_number}, lead_id={lead_id}, business_name={business_name}, dashboard={dashboard_url}")
 
     # Initialize function context
     fnc_ctx = TransferFunctions(ctx, phone_number, dashboard_url, lead_id)
@@ -324,11 +328,16 @@ async def entrypoint(ctx: agents.JobContext):
             tts=openai.TTS(),
         )
 
+    # Build dynamic instructions
+    system_prompt = config.SYSTEM_PROMPT
+    if business_name:
+        system_prompt += f"\n\n## TARGET BUSINESS DETAILS (VERY IMPORTANT):\n- You are calling a business named: '{business_name}'\n- As soon as the call connects, you MUST first confirm if you are talking to the representative of '{business_name}' by saying: 'गुड मॉर्निंग सर, क्या मैं {business_name} से बात कर रहा हूँ?'"
+
     # Start the session
     print("--- BOOM: Starting Session ---")
     await session.start(
         room=ctx.room,
-        agent=OutboundAssistant(tools=list(fnc_ctx.function_tools.values())),
+        agent=OutboundAssistant(tools=list(fnc_ctx.function_tools.values()), instructions=system_prompt),
     )
     print("--- BOOM: Session Started Successfully ---")
 
@@ -344,6 +353,25 @@ async def entrypoint(ctx: agents.JobContext):
         if msg.content:
             logger.info(f"AGENT: {msg.content}")
             print(f"--- BOOM AGENT SAID: {msg.content} ---\n")
+            
+            # --- FAIL-SAFE CALL HANGUP ---
+            # Agar LLM tool call karna bhool jaye, par Nitin farewell bol de, toh call 4s me cut ho jayegi
+            content_lower = msg.content.lower()
+            farewell_phrases = [
+                "shubh ho", "शुभ हो", 
+                "demo bhej", "डेमो भेज", 
+                "keemti samay", "कीमती समय", 
+                "great day", "ग्रेट डे",
+                "thank you, main aapko whatsapp",
+                "aapka din shubh"
+            ]
+            if any(phrase in content_lower for phrase in farewell_phrases):
+                print("--- [FAIL-SAFE] Farewell detected! Hanging up call in 4 seconds... ---")
+                async def _fail_safe_shutdown():
+                    await asyncio.sleep(4.0)
+                    print("--- [FAIL-SAFE] Shutting down room session now! ---")
+                    ctx.shutdown()
+                asyncio.ensure_future(_fail_safe_shutdown())
 
     should_dial = False
     if phone_number:
@@ -407,24 +435,30 @@ async def entrypoint(ctx: agents.JobContext):
             
             print("[TRACE] Sleeping 2.0s to let SIP audio channel initialize...")
             await asyncio.sleep(2.0)
+            
+            # Construct greeting dynamically if business_name is available
+            greeting = config.INITIAL_GREETING
+            if business_name:
+                greeting = f"गुड मॉर्निंग सर, क्या मैं {business_name} से बात कर रहा हूँ? मेरा नाम नितिन है, और ये एक मार्केटिंग कॉल है, हम बिज़नेस के लिए वेबसाइट बनाते हैं, मैं बस आपके 30 सेकंड्स लूँगा.."
+                
             try:
                 if hasattr(session, "say"):
                     print(f"[TRACE] Calling session.say() with allow_interruptions=False")
                     # Set allow_interruptions to False so background noise doesn't immediately cut it off!
                     if asyncio.iscoroutinefunction(session.say):
-                        await session.say(config.INITIAL_GREETING, allow_interruptions=False)
+                        await session.say(greeting, allow_interruptions=False)
                     else:
-                        session.say(config.INITIAL_GREETING, allow_interruptions=False)
+                        session.say(greeting, allow_interruptions=False)
                     print("[TRACE] session.say() executed successfully.")
                 elif hasattr(session, "generate_reply"):
                     print("--- BOOM: Calling session.generate_reply() ---")
                     if asyncio.iscoroutinefunction(session.generate_reply):
-                        await session.generate_reply(instructions=config.INITIAL_GREETING)
+                        await session.generate_reply(instructions=greeting)
                     else:
-                        session.generate_reply(instructions=config.INITIAL_GREETING)
+                        session.generate_reply(instructions=greeting)
                 else:
                     print("--- BOOM: Pushing system message to LLM ---")
-                    session.push_message(llm.ChatMessage(role="system", content=f"Call started. Greet the user now: {config.INITIAL_GREETING}"))
+                    session.push_message(llm.ChatMessage(role="system", content=f"Call started. Greet the user now: {greeting}"))
             except Exception as e:
                 import traceback
                 print(f"--- BOOM ERROR IN GREETING: {e} ---")

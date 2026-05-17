@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { agentDispatchClient } from '@/lib/server-utils';
+import { getLeads } from '@/lib/data-store';
 
 export async function POST(request: Request) {
     try {
@@ -16,11 +17,27 @@ export async function POST(request: Request) {
 
         console.log(`Dispatching Agent to call ${phoneNumber} in room ${roomName}`);
 
-        // Prepare metadata for the agent - matching exactly what make_call.py sends
+        // Fetch business name dynamically from data-store
+        let businessName = '';
+        if (leadId) {
+            const leads = getLeads();
+            const lead = leads.find(l => l.id === leadId);
+            if (lead) {
+                businessName = lead.businessName;
+            }
+        }
+
+        // Determine request host to correctly notify the hosted dashboard (Vercel)
+        const host = request.headers.get('host') || 'localhost:3000';
+        const protocol = host.includes('localhost') ? 'http' : 'https';
+        const dashboardUrl = `${protocol}://${host}`;
+
+        // Prepare metadata for the agent
         const metadata = JSON.stringify({
             phone_number: phoneNumber,
             lead_id: leadId || null,
-            dashboard_url: `http://localhost:${process.env.PORT || 3000}`
+            business_name: businessName || null,
+            dashboard_url: dashboardUrl
         });
 
         // Dispatch the Agent
