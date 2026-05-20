@@ -23,6 +23,7 @@ interface Stats {
   totalLeads: number;
   pending: number;
   calling: number;
+  onCall: number;
   demoConfirmed: number;
   notConfirmed: number;
   noAnswer: number;
@@ -38,7 +39,7 @@ const TABS = [
 ];
 
 const DEFAULT_STATS: Stats = {
-  totalLeads: 0, pending: 0, calling: 0, demoConfirmed: 0,
+  totalLeads: 0, pending: 0, calling: 0, onCall: 0, demoConfirmed: 0,
   notConfirmed: 0, noAnswer: 0, callback: 0, totalCalls: 0,
 };
 
@@ -133,7 +134,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-xl font-bold">
-                <span className="text-white">Rapid X</span>
+                <span className="text-white">LeadVelocity</span>
                 <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400"> AI</span>
               </h1>
               <p className="text-xs text-gray-500">Sales Agent Dashboard</p>
@@ -297,17 +298,10 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="relative z-10 border-t border-white/5 py-6 mt-12">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-center gap-4 text-center">
           <p className="text-sm text-gray-600">
-            Powered by <span className="text-white font-semibold">Rapid X AI</span>
+            Powered by <span className="text-white font-semibold">LeadVelocity AI</span>
           </p>
-          <div className="flex gap-4 text-xs text-gray-600">
-            <a href="https://instagram.com/ai.w.raj" target="_blank" className="hover:text-pink-400 transition-colors">Instagram: @ai.w.raj</a>
-            <span className="text-gray-800">|</span>
-            <a href="https://x.com/topR9595" target="_blank" className="hover:text-blue-400 transition-colors">X: @topR9595</a>
-            <span className="text-gray-800">|</span>
-            <a href="https://youtube.com/@ShreyasRaj" target="_blank" className="hover:text-red-400 transition-colors">YouTube: Shreyas Raj</a>
-          </div>
         </div>
       </footer>
     </main>

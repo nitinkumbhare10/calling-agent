@@ -8,7 +8,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Rapid X AI - Sales Agent Dashboard",
+  title: "LeadVelocity AI - Sales Agent Dashboard",
   description: "AI-powered outbound sales calling agent dashboard. Manage leads, make calls, and track results.",
 };
 

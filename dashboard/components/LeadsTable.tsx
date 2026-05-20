@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Phone, CheckCircle, XCircle, Clock, PhoneOff, Loader2, MoreHorizontal, Trash2, PhoneCall, Download, Search } from 'lucide-react';
+import { Phone, CheckCircle, XCircle, Clock, PhoneOff, Loader2, MoreHorizontal, Trash2, PhoneCall, Download, Search, PhoneIncoming } from 'lucide-react';
 
 interface Lead {
   id: string;
@@ -18,9 +18,10 @@ interface LeadsTableProps {
   onCallLead: (lead: Lead) => void;
 }
 
-const STATUS_CONFIG: Record<string, { label: string; icon: any; color: string; bg: string }> = {
+const STATUS_CONFIG: Record<string, { label: string; icon: any; color: string; bg: string; pulse?: boolean }> = {
   pending: { label: 'Pending', icon: Clock, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20' },
   calling: { label: 'Calling...', icon: PhoneCall, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' },
+  on_call: { label: 'On Call', icon: PhoneIncoming, color: 'text-emerald-300', bg: 'bg-emerald-500/20 border-emerald-400/40', pulse: true },
   demo_confirmed: { label: 'Demo Confirmed', icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/20' },
   not_confirmed: { label: 'Not Confirmed', icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20' },
   no_answer: { label: 'No Answer', icon: PhoneOff, color: 'text-gray-400', bg: 'bg-gray-500/10 border-gray-500/20' },
@@ -93,6 +94,7 @@ export default function LeadsTable({ leads, onRefresh, onCallLead }: LeadsTableP
           <option value="all">All Status</option>
           <option value="pending">Pending</option>
           <option value="calling">Calling</option>
+          <option value="on_call">On Call</option>
           <option value="demo_confirmed">Demo Confirmed</option>
           <option value="not_confirmed">Not Confirmed</option>
           <option value="no_answer">No Answer</option>
@@ -137,9 +139,12 @@ export default function LeadsTable({ leads, onRefresh, onCallLead }: LeadsTableP
                     <td className="p-4 text-white font-medium">{lead.businessName}</td>
                     <td className="p-4 text-gray-300 font-mono">{lead.phoneNumber}</td>
                     <td className="p-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${statusCfg.bg} ${statusCfg.color}`}>
-                        <StatusIcon className="w-3 h-3" />
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${statusCfg.bg} ${statusCfg.color} ${
+                        statusCfg.pulse ? 'animate-pulse shadow-[0_0_8px_2px_rgba(52,211,153,0.4)]' : ''
+                      }`}>
+                        <StatusIcon className={`w-3 h-3 ${statusCfg.pulse ? 'animate-bounce' : ''}`} />
                         {statusCfg.label}
+                        {statusCfg.pulse && <span className="relative flex h-2 w-2 ml-0.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>}
                       </span>
                     </td>
                     <td className="p-4 text-gray-400 text-xs">
