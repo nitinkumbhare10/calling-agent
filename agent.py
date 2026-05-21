@@ -19,7 +19,9 @@ from livekit.plugins import (
     noise_cancellation,
     silero,
     sarvam,
+    google,  # ✅ FIX: Must be imported on main thread to register plugin correctly
 )
+import openai as openai_client  # ✅ FIX: For explicit Groq client
 from livekit.agents import llm
 from typing import Annotated, Optional
 
@@ -40,169 +42,320 @@ def _build_tts(config_provider: str = None, config_voice: str = None):
     """Configure the Text-to-Speech provider based on env vars or dynamic config."""
     # Priority: Config > Env Var > Default
     provider = (config_provider or os.getenv("TTS_PROVIDER", config.DEFAULT_TTS_PROVIDER)).lower()
-    print(f"\n==============================================")
-    print(f"DEBUG: TTS_PROVIDER selected is -> {provider}")
-    print(f"DEBUG: Voice ID requested is -> {config_voice}")
-    print(f"DEBUG: OPENAI_API_KEY present? -> {'Yes' if os.getenv('OPENAI_API_KEY') else 'No'}")
-    print(f"==============================================\n")
+    voice_name = config_voice or ""
     
-    # If using Sarvam Voice names (Anushka/Aravind), force Sarvam provider
-    if config_voice in ["anushka", "aravind", "amartya", "dhruv"]:
+    # List of valid/compatible Sarvam bulbul:v3 voices
+    valid_sarvam_voices = [
+        "shubh", "ritu", "rahul", "pooja", "simran", "kavya", "amit", 
+        "ratan", "rohan", "dev", "ishita", "shreya", "manan", "sumit", 
+        "priya", "aditya", "kabir", "neha", "varun", "roopa", "aayan", 
+        "ashutosh", "advait", "amelia", "sophia"
+    ]
+
+    # Override provider based on voice_name ONLY if provider is NOT explicitly set to cartesia
+    if provider != "cartesia":
+        if voice_name == "imran" or voice_name == "bdab08ad-4137-4548-b9db-6142854c7525":
+            provider = "cartesia"
+        elif voice_name in valid_sarvam_voices:
+            provider = "sarvam"
+        elif voice_name.startswith("aura-"):
+            provider = "deepgram"
+    elif voice_name in ["anushka", "aravind"]:
+        # Fallback incompatible Sarvam voices to supported ones
         provider = "sarvam"
+        voice_name = "shreya" if voice_name == "anushka" else "amit"
+
+    print(f"\n==============================================")
+    print(f"DEBUG: TTS_PROVIDER resolved is -> {provider}")
+    print(f"DEBUG: Voice ID requested is -> {voice_name}")
+    print(f"==============================================\n")
 
     if provider == "cartesia":
         logger.info("Using Cartesia TTS")
         model = os.getenv("CARTESIA_TTS_MODEL", config.CARTESIA_MODEL)
-        voice = os.getenv("CARTESIA_TTS_VOICE", config.CARTESIA_VOICE)
-        language = os.getenv("CARTESIA_LANGUAGE", config.CARTESIA_LANGUAGE)
-        print(f"DEBUG: Using Cartesia with model={model}, voice={voice}, language={language}")
-        return cartesia.TTS(model=model, voice=voice, language=language)
+        # Always use configured Hindi voice for Cartesia
+        voice_id = config.CARTESIA_VOICE
+        language = config.CARTESIA_LANGUAGE
+        print(f"DEBUG: Using Cartesia with model={model}, voice={voice_id}, language={language}")
+        return cartesia.TTS(model=model, voice=voice_id, language=language)
     
     if provider == "sarvam":
-        logger.info(f"Using Sarvam TTS (Voice: {config_voice})")
+        logger.info(f"Using Sarvam TTS (Voice: {voice_name})")
         model = os.getenv("SARVAM_TTS_MODEL", config.SARVAM_MODEL)
-        # Use dynamic voice or env var or default
-        # Ignore OpenAI specific voices
-        valid_sarvam_voices = ["shubh", "ritu", "rahul", "pooja", "simran", "kavya", "amit", "ratan", "rohan", "dev", "ishita", "shreya", "manan", "sumit", "priya", "aditya", "kabir", "neha", "varun", "roopa", "aayan", "ashutosh", "advait", "amelia", "sophia", "anushka", "aravind"]
-        voice = config_voice if config_voice in valid_sarvam_voices else os.getenv("SARVAM_VOICE", "amit")
+        voice = voice_name if voice_name in valid_sarvam_voices else os.getenv("SARVAM_VOICE", "amit")
         language = os.getenv("SARVAM_LANGUAGE", config.SARVAM_LANGUAGE)
         return sarvam.TTS(model=model, speaker=voice, target_language_code=language)
 
     if provider == "deepgram":
-        # Check if the voice name is a valid Deepgram voice (usually starts with aura-)
-        voice = config_voice if config_voice and config_voice.startswith("aura-") else os.getenv("DEEPGRAM_TTS_MODEL", config.DEFAULT_TTS_VOICE)
+        voice = voice_name if voice_name.startswith("aura-") else os.getenv("DEEPGRAM_TTS_MODEL", config.DEFAULT_TTS_VOICE)
         logger.info(f"Using Deepgram TTS (Voice: {voice})")
         return deepgram.TTS(model=voice)
 
-    # Default to OpenAI
-    logger.info(f"Using OpenAI TTS (Voice: {config_voice})")
-    model = os.getenv("OPENAI_TTS_MODEL", "tts-1")
-    voice = config_voice or os.getenv("OPENAI_TTS_VOICE", config.DEFAULT_TTS_VOICE)
-    return openai.TTS(model=model, voice=voice)
+    # Default to Deepgram if no matched provider
+    voice = voice_name or config.DEFAULT_TTS_VOICE
+    logger.info(f"Using Default TTS (Deepgram Voice: {voice})")
+    return deepgram.TTS(model=voice)
 
 
 def _build_llm(config_provider: str = None):
-    """Configure the LLM provider based on config or env vars. Strictly forces Groq."""
+    """Configure the LLM provider based on config or env vars."""
+    provider = (config_provider or os.getenv("LLM_PROVIDER", config.DEFAULT_LLM_PROVIDER)).lower()
     
-    logger.info("Using Groq LLM (Enforced)")
-    return openai.LLM(
+    if provider in ["gemini", "google"]:
+        gemini_model = os.getenv("GEMINI_MODEL", config.GEMINI_MODEL)
+        print(f"[LLM] Building Gemini LLM with model: {gemini_model}")
+        logger.info(f"Using Gemini LLM (model: {gemini_model})")
+        # ✅ FIX: Set GOOGLE_API_KEY env var before calling google.LLM()
+        os.environ["GOOGLE_API_KEY"] = os.getenv("GEMINI_API_KEY", "")
+        return google.LLM(
+            model=gemini_model,
+            temperature=float(os.getenv("GEMINI_TEMPERATURE", str(config.GEMINI_TEMPERATURE))),
+        )
+    
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Groq Fallback
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    groq_model = os.getenv("GROQ_MODEL", config.GROQ_MODEL)
+    print(f"[LLM] Building Groq LLM with model: {groq_model}")
+    logger.info(f"Using Groq LLM (model: {groq_model})")
+    
+    client = openai_client.AsyncOpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=os.getenv("GROQ_API_KEY"),
-        model=os.getenv("GROQ_MODEL", config.GROQ_MODEL),
+    )
+    
+    return openai.LLM(
+        client=client,
+        model=groq_model,
         temperature=float(os.getenv("GROQ_TEMPERATURE", str(config.GROQ_TEMPERATURE))),
     )
 
 
 
-class TransferFunctions(llm.ToolContext):
-    def __init__(self, ctx: agents.JobContext, phone_number: str = None, dashboard_url: str = None, lead_id: str = None):
+class ConversationManager:
+    def __init__(self, business_name: str = None):
+        self.state = "greeting"
+        self.business_name = business_name
+        
+    def get_system_prompt(self):
+        prompt = config.BASE_PROMPT
+        if self.business_name:
+            prompt += f"\n\n## TARGET BUSINESS DETAILS:\n- You are calling a business named: '{self.business_name}'"
+        
+        state_instruction = config.STATE_PROMPTS.get(self.state, "")
+        prompt += f"\n\n## STATE INSTRUCTIONS:\n{state_instruction}"
+        return prompt
+
+class CallStateTools(llm.ToolContext):
+    def __init__(self, ctx: agents.JobContext, phone_number: str = None, dashboard_url: str = None, lead_id: str = None, conv_manager: ConversationManager = None):
         super().__init__(tools=[])
         self.ctx = ctx
         self.phone_number = phone_number
         self.dashboard_url = dashboard_url
         self.lead_id = lead_id
+        self.conv_manager = conv_manager
+        self.session = None  # Will be set after session creation
+        self.call_ended_by_tool = False
+        self.final_status = None  # ✅ FIX: Hamesha track karo call ka final status
+        self.last_user_speech_time = asyncio.get_event_loop().time()
 
-    @llm.function_tool(description="End the call. Use this when the customer says they are not interested, they already have a website, or they just want to hang up.")
-    async def not_interested(self):
-        logger.info("Customer not interested. Ending call.")
-        self.call_ended_by_tool = True
-        if self.dashboard_url and self.lead_id:
-            try:
-                # Fire and forget dashboard update
-                asyncio.ensure_future(_notify_dashboard(self.dashboard_url, self.lead_id, "not_confirmed"))
-            except Exception as e:
-                logger.error(f"Error in notify: {e}")
-                
-        # Drop the call immediately after thank you
-        async def _delayed_shutdown():
-            await asyncio.sleep(2)
-            self.ctx.shutdown()
+    def trigger_failsafe_hangup(self):
+        # ══════════════════════════════════════════════════════════════════
+        # TRACE CASE 11: Vobiz Call Disconnect Failsafe
+        # Start a 7s failsafe timer. If the call is still active (e.g. because
+        # the farewell phrase matching failed or agent got interrupted),
+        # we will force ctx.shutdown() to ensure the PSTN call is severed!
+        # ══════════════════════════════════════════════════════════════════
+        async def _failsafe_shutdown():
+            if hasattr(self, 'log_trace'):
+                self.log_trace("[TRACE-11 FAILSAFE] ⏰ Failsafe hangup timer started (7s)...")
+            else:
+                print("--- [TRACE-11 FAILSAFE] ⏰ Failsafe hangup timer started (7s)... ---")
             
-        asyncio.ensure_future(_delayed_shutdown())
-        return "EXACTLY say: 'Ok sir, koi baat nahi. Thank you, aapka din shubh ho.' and then wait silently."
-
-    @llm.function_tool(description="CRITICAL: Only call this AFTER you have explained the free demo website offer AND the customer explicitly says they want to see the demo on WhatsApp. Do NOT call this when they are just confirming their name. WhatsApp number is optional.")
-    async def confirm_demo(self, whatsapp_number: Optional[str] = None):
-        logger.info(f"Demo confirmed. WhatsApp Number: {whatsapp_number or 'same as call number'}")
-        self.call_ended_by_tool = True
-        # Use call number as fallback if no WhatsApp number given
-        wa_number = whatsapp_number or self.phone_number or ""
-        if self.dashboard_url and self.lead_id:
+            await asyncio.sleep(7)
+            
             try:
-                # Dashboard update
+                if hasattr(self, 'log_trace'):
+                    self.log_trace("[TRACE-11 FAILSAFE] 🛑 Failsafe triggered! Ensuring Vobiz call connection is completely cut...")
+                else:
+                    print("--- [TRACE-11 FAILSAFE] 🛑 Failsafe triggered! Ensuring Vobiz call connection is completely cut... ---")
+                
+                if getattr(self, 'egress_id', None):
+                    try:
+                        await _stop_recording(self.egress_id)
+                    except Exception as e:
+                        print(f"Failsafe recording stop error: {e}")
+                
+                self.ctx.shutdown()
+                
+                if hasattr(self, 'log_trace'):
+                    self.log_trace("[TRACE-11 FAILSAFE] ✅ Failsafe ctx.shutdown() completed.")
+                else:
+                    print("--- [TRACE-11 FAILSAFE] ✅ Failsafe ctx.shutdown() completed. ---")
+            except Exception as e:
+                print(f"--- [FAILSAFE ERROR] {e} ---")
+
+        asyncio.ensure_future(_failsafe_shutdown())
+
+    def _update_state_prompt(self):
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # FIX: session.chat_ctx.messages.append() causes
+        # 'An internal error occurred' in newer LiveKit versions.
+        # Use session.update_instructions() instead.
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        if not self.session:
+            print("[STATE] _update_state_prompt: session not set yet, skipping")
+            return
+        try:
+            new_prompt = self.conv_manager.get_system_prompt()
+            # Try modern API first
+            if hasattr(self.session, 'update_instructions'):
+                self.session.update_instructions(new_prompt)
+                print(f"[STATE] Instructions updated via update_instructions(). State: {self.conv_manager.state}")
+            elif hasattr(self.session, 'set_instructions'):
+                self.session.set_instructions(new_prompt)
+                print(f"[STATE] Instructions updated via set_instructions(). State: {self.conv_manager.state}")
+            else:
+                # Safe fallback: inject via generate_reply context
+                print(f"[STATE] update_instructions not available. State tracked internally: {self.conv_manager.state}")
+        except Exception as e:
+            print(f"[STATE] _update_state_prompt error (non-fatal): {e}")
+            logger.warning(f"State prompt update failed: {e}")
+
+    @llm.function_tool(description="Transition to the 'pitch' state. Call this ONLY AFTER the user confirms their identity or says yes to talking.")
+    async def transition_state(self):
+        import time
+        print(f"[TRACE-STATE] transition_state CALLED at {time.strftime('%H:%M:%S')}")
+        logger.info("Transitioning state to PITCH")
+        self.conv_manager.state = "pitch"
+        self._update_state_prompt()
+        print(f"[TRACE-STATE] State is now: {self.conv_manager.state}")
+        return "State updated to pitch. Now pitch the free demo website."
+
+    @llm.function_tool(description="Move to the confirmation state. Call this ONLY when the customer EXPLICITLY says they want to see the demo or books a slot.")
+    async def initiate_booking_flow(self):
+        import time
+        print(f"[TRACE-STATE] initiate_booking_flow CALLED at {time.strftime('%H:%M:%S')}")
+        
+        # ══════════════════════════════════════════════════════════════════
+        # TRACE CASE 13: Triple Confirmation Guard
+        # Prevent re-entry if already in confirmation_pending or call_ended
+        # ══════════════════════════════════════════════════════════════════
+        current_state = self.conv_manager.state
+        if current_state == "confirmation_pending":
+            print(f"--- [TRACE-13 TRIPLE CONFIRM] ⚠️ initiate_booking_flow called AGAIN but already in confirmation_pending! Blocking re-entry. ---")
+            if hasattr(self, 'log_trace'):
+                self.log_trace(f"[TRACE-13 TRIPLE CONFIRM] ⚠️ BLOCKED: initiate_booking_flow re-called while state='{current_state}'. LLM is looping!")
+            return "You have ALREADY asked for confirmation. Do NOT ask again. Wait for customer's yes/no reply."
+        if current_state == "call_ended":
+            print(f"--- [TRACE-13 TRIPLE CONFIRM] ⚠️ initiate_booking_flow called but call already ended! ---")
+            if hasattr(self, 'log_trace'):
+                self.log_trace(f"[TRACE-13 TRIPLE CONFIRM] ⚠️ BLOCKED: initiate_booking_flow called after call_ended state.")
+            return "Call has already ended. Do not take any more actions. Stay silent."
+        
+        logger.info("Transitioning to CONFIRMATION_PENDING state")
+        self.conv_manager.state = "confirmation_pending"
+        self._update_state_prompt()
+        print(f"[TRACE-STATE] State is now: {self.conv_manager.state}")
+        return "State updated. You MUST now ask for final confirmation: 'Sir confirm kar raha hu, WhatsApp par bhej du?'"
+
+    @llm.function_tool(description="""Finalize the booking. Call this ONLY after the customer says YES to your final confirmation question in the confirmation_pending state.
+    IMPORTANT: DO NOT ask for WhatsApp number. We already have it. Just call this tool immediately when customer confirms.
+    Trigger words: 'haan', 'theek hai', 'bhej do', 'kar do', 'ok', 'yes', 'haan bhej do', 'link bhej do', 'whatsapp kar do', 'send kar do'""")
+    async def finalize_demo_booking(self):
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # TRACE CASE 3: Booking confirmation trace
+        # Yeh tool tab call hoga jab customer ne confirm kiya
+        # Agar yeh log nahi dikh raha aur customer ne confirm bol diya tha
+        # toh LLM ne confirmation phrase recognize nahi ki
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        import time
+        trace_time = time.strftime("%H:%M:%S")
+        
+        # ══════════════════════════════════════════════════════════════════
+        # TRACE CASE 13: Triple Confirmation Guard
+        # Prevent LLM from calling finalize_demo_booking more than once
+        # ══════════════════════════════════════════════════════════════════
+        finalize_count = getattr(self, '_finalize_call_count', 0) + 1
+        self._finalize_call_count = finalize_count
+        
+        print(f"--- [TRACE-13 TRIPLE CONFIRM] finalize_demo_booking called (attempt #{finalize_count}) at {trace_time} ---")
+        if hasattr(self, 'log_trace'):
+            self.log_trace(f"[TRACE-13 TRIPLE CONFIRM] finalize_demo_booking attempt #{finalize_count} at {trace_time}")
+        
+        if finalize_count > 1:
+            print(f"--- [TRACE-13 TRIPLE CONFIRM] ⚠️ BLOCKED: finalize_demo_booking already called {finalize_count - 1} time(s) before! LLM is re-invoking! ---")
+            if hasattr(self, 'log_trace'):
+                self.log_trace(f"[TRACE-13 TRIPLE CONFIRM] ⚠️ BLOCKED: Re-invocation #{finalize_count}. Demo was already confirmed. LLM should stop.")
+            return "Demo booking is ALREADY CONFIRMED. Do NOT say anything else. Stay completely silent and wait for the call to end."
+        
+        print(f"--- [TRACE-3 BOOKING] ✅ finalize_demo_booking CALLED at {trace_time} ---")
+        print(f"--- [TRACE-3 BOOKING] Phone: {self.phone_number}, Lead: {self.lead_id} ---")
+        print(f"--- [TRACE-3 BOOKING] Dashboard URL: {self.dashboard_url} ---")
+        logger.info(f"[TRACE-3] Demo formally confirmed. Phone: {self.phone_number}")
+        
+        self.call_ended_by_tool = True
+        self.final_status = "demo_confirmed"  # ✅ FIX: final status set karo
+        self.conv_manager.state = "call_ended"  # ✅ TRACE-13 FIX: Block all further LLM actions
+        self._update_state_prompt()  # ✅ Push silence instructions to LLM immediately
+        self.trigger_failsafe_hangup()  # ⏰ Start Vobiz hangup failsafe
+        wa_number = self.phone_number or ""
+        
+        if self.dashboard_url and self.lead_id:
+            print(f"--- [TRACE-3 BOOKING] Sending PATCH to dashboard: status=demo_confirmed ---")
+            try:
                 async def _update_demo():
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         url = f"{self.dashboard_url}/api/leads/{self.lead_id}"
                         payload = {"status": "demo_confirmed", "whatsapp_number": wa_number}
-                        await client.patch(url, json=payload)
+                        print(f"--- [TRACE-3 BOOKING] PATCH URL: {url}, Payload: {payload} ---")
+                        resp = await client.patch(url, json=payload)
+                        print(f"--- [TRACE-3 BOOKING] Dashboard response: {resp.status_code} ---")
                 asyncio.ensure_future(_update_demo())
             except Exception as e:
-                logger.error(f"Failed to notify dashboard of demo confirmation: {e}")
-        
-        # End call after thank you
-        async def _delayed_shutdown():
-            await asyncio.sleep(3)
-            self.ctx.shutdown()
-            
-        asyncio.ensure_future(_delayed_shutdown())
-        return "EXACTLY say: 'Bilkul sir, main thode der mein aapki demo website aapke WhatsApp par bhej dunga. Thank you, aapka din shubh ho!' and then wait silently."
-
-    @llm.function_tool(description="Transfer the call to a human support agent or another phone number.")
-    async def transfer_call(self, destination: Optional[str] = None):
-        """
-        Transfer the call.
-        """
-        if destination is None:
-            destination = config.DEFAULT_TRANSFER_NUMBER
-            if not destination:
-                 return "Error: No default transfer number configured."
-        if "@" not in destination:
-            # If no domain is provided, append the SIP domain
-            if config.SIP_DOMAIN:
-                # Ensure clean number (strip tel: or sip: prefix if present but no domain)
-                clean_dest = destination.replace("tel:", "").replace("sip:", "")
-                destination = f"sip:{clean_dest}@{config.SIP_DOMAIN}"
-            else:
-                # Fallback to tel URI if no domain configured
-                if not destination.startswith("tel:") and not destination.startswith("sip:"):
-                     destination = f"tel:{destination}"
-        elif not destination.startswith("sip:"):
-             destination = f"sip:{destination}"
-        
-        logger.info(f"Transferring call to {destination}")
-        
-        # Determine the participant identity
-        # For outbound calls initiated by this agent, the participant identity is typically "sip_<phone_number>"
-        # For inbound, we might need to find the remote participant.
-        participant_identity = None
-        
-        # If we stored the phone number from metadata, we can construct the identity
-        if self.phone_number:
-            participant_identity = f"sip_{self.phone_number}"
+                print(f"--- [TRACE-3 BOOKING] ❌ Dashboard update FAILED: {e} ---")
+                logger.error(f"Failed to notify dashboard: {e}")
         else:
-            # Try to find a participant that is NOT the agent
-            for p in self.ctx.room.remote_participants.values():
-                participant_identity = p.identity
-                break
+            print(f"--- [TRACE-3 BOOKING] ⚠️ Dashboard NOT notified: url={self.dashboard_url}, lead_id={self.lead_id} ---")
         
-        if not participant_identity:
-            logger.error("Could not determine participant identity for transfer")
-            return "Failed to transfer: could not identify the caller."
+        # Note: We rely on the graceful shutdown logic to terminate the call after TTS finishes
+        return "EXACTLY say: 'Thank you sir, aapka demo schedule ho gaya hai. Team aapse kal connect karegi. Aapka din shubh ho.' — then stay COMPLETELY SILENT. Do NOT say anything else after this."
 
-        try:
-            logger.info(f"Transferring participant {participant_identity} to {destination}")
-            await self.ctx.api.sip.transfer_sip_participant(
-                api.TransferSIPParticipantRequest(
-                    room_name=self.ctx.room.name,
-                    participant_identity=participant_identity,
-                    transfer_to=destination,
-                    play_dialtone=False
-                )
-            )
-            return "Transfer initiated successfully."
-        except Exception as e:
-            logger.error(f"Transfer failed: {e}")
-            return f"Error executing transfer: {e}"
+    @llm.function_tool(description="End the call. Use this when the customer says they are not interested, already have a website, or just hang up.")
+    async def mark_not_interested(self):
+        logger.info("Customer not interested.")
+        self.call_ended_by_tool = True
+        self.final_status = "not_confirmed"  # ✅ FIX: final status set karo
+        self.conv_manager.state = "call_ended"  # ✅ TRACE-13 FIX: Block all further LLM actions
+        self._update_state_prompt()  # ✅ Push silence instructions to LLM immediately
+        self.trigger_failsafe_hangup()  # ⏰ Start Vobiz hangup failsafe
+        if self.dashboard_url and self.lead_id:
+            try:
+                asyncio.ensure_future(_notify_dashboard(self.dashboard_url, self.lead_id, "not_confirmed"))
+            except Exception as e:
+                pass
+        return "EXACTLY say: 'Ok sir, koi baat nahi. Apna keemti samay dene ke liye shukriya. Aapka din shubh ho.' — then stay COMPLETELY SILENT. Do NOT say anything else after this."
+
+    @llm.function_tool(description="Schedule a callback. Use this when the customer says they are busy, driving, or asks you to call back later/tomorrow.")
+    async def request_callback(self, time_preference: Optional[str] = None):
+        logger.info(f"Callback requested: {time_preference}")
+        self.call_ended_by_tool = True
+        self.final_status = "callback_requested"  # ✅ FIX: final status set karo
+        self.conv_manager.state = "call_ended"  # ✅ TRACE-13 FIX: Block all further LLM actions
+        self._update_state_prompt()  # ✅ Push silence instructions to LLM immediately
+        self.trigger_failsafe_hangup()  # ⏰ Start Vobiz hangup failsafe
+        if self.dashboard_url and self.lead_id:
+            try:
+                async def _update_callback():
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        url = f"{self.dashboard_url}/api/leads/{self.lead_id}"
+                        payload = {"status": "callback_requested", "notes": f"Callback preference: {time_preference}"}
+                        await client.patch(url, json=payload)
+                asyncio.ensure_future(_update_callback())
+            except Exception as e:
+                pass
+        return "EXACTLY say: 'Theek hai sir, main baad me call kar lunga. Aapka samay dene ke liye shukriya.' — then stay COMPLETELY SILENT. Do NOT say anything else after this."
+
 
 
 class OutboundAssistant(Agent):
@@ -345,7 +498,7 @@ async def entrypoint(ctx: agents.JobContext):
     phone_number = None
     lead_id = None
     business_name = None
-    dashboard_url = "http://localhost:3000"
+    dashboard_url = os.getenv("DASHBOARD_URL", "http://localhost:3000")
     config_dict = {}
     call_answered = False
     
@@ -379,55 +532,51 @@ async def entrypoint(ctx: agents.JobContext):
     
     logger.info(f"Call config: phone={phone_number}, lead_id={lead_id}, business_name={business_name}, dashboard={dashboard_url}")
 
-    # Initialize function context
-    fnc_ctx = TransferFunctions(ctx, phone_number, dashboard_url, lead_id)
+    # Initialize function context and Conversation Manager
+    conv_manager = ConversationManager(business_name)
+    fnc_ctx = CallStateTools(ctx, phone_number, dashboard_url, lead_id, conv_manager)
 
     # Resilient configuration fetching
     m_provider = config_dict.get("model_provider") or os.getenv("LLM_PROVIDER") or config.DEFAULT_LLM_PROVIDER
     tts_provider = config_dict.get("tts_provider") or os.getenv("TTS_PROVIDER") or config.DEFAULT_TTS_PROVIDER
-    m_voice = config_dict.get("voice_id") or os.getenv("OPENAI_TTS_VOICE") or config.DEFAULT_TTS_VOICE
+    m_voice = config_dict.get("voice_id") or config.DEFAULT_TTS_VOICE
     
     print(f"--- BOOM: Initializing with LLM Provider: {m_provider}, TTS Provider: {tts_provider}, Voice: {m_voice} ---")
 
-    # Initialize the Agent Session with plugins
+    # Initialize the Agent Session with optimized settings
     try:
         session = AgentSession(
-            vad=silero.VAD.load(min_silence_duration=0.3, min_speech_duration=0.1),
-            stt=deepgram.STT(model=config.STT_MODEL, language=config.STT_LANGUAGE, interim_results=True), 
+            vad=silero.VAD.load(
+                min_silence_duration=0.5,  # Higher = less false interruptions
+                min_speech_duration=0.2   # Higher = only detect real speech
+            ),
+            stt=deepgram.STT(
+                model=config.STT_MODEL, 
+                language=config.STT_LANGUAGE, 
+                interim_results=True
+            ), 
             llm=_build_llm(m_provider),
             tts=_build_tts(tts_provider, m_voice),
         )
         print("--- BOOM: Session Object Created ---")
     except Exception as e:
         print(f"--- BOOM CRITICAL ERROR: Session Init Failed: {e} ---")
-        # Extreme fallback to OpenAI defaults
+        # Extreme fallback without OpenAI defaults
         session = AgentSession(
-            vad=silero.VAD.load(min_silence_duration=0.3),
+            vad=silero.VAD.load(min_silence_duration=0.5),
             stt=deepgram.STT(model="nova-2", language="hi"),
-            llm=openai.LLM(),
-            tts=openai.TTS(),
+            llm=_build_llm(m_provider),
+            tts=deepgram.TTS(model=config.DEFAULT_TTS_VOICE),
         )
 
-    # Calculate time-based greeting for context injection
-    from datetime import datetime, timezone, timedelta
-    ist = timezone(timedelta(hours=5, minutes=30))
-    hour = datetime.now(ist).hour
-    if hour < 12:
-        time_salutation = "गुड मॉर्निंग"
-    elif hour < 17:
-        time_salutation = "गुड आफ्टरनून"
-    else:
-        time_salutation = "गुड ईवनिंग"
-
+    # Build greeting using config
     if business_name:
-        greeting = f"{time_salutation} सर, क्या मैं {business_name} से बात कर रहा हूँ?"
+        greeting = config.INITIAL_GREETING.replace("ओनर", business_name)
     else:
-        greeting = f"{time_salutation} सर, मेरा नाम नितिन है, हम बिज़नेस के लिए वेबसाइट बनाते हैं।"
+        greeting = config.INITIAL_GREETING
 
-    # Build dynamic instructions
-    system_prompt = config.SYSTEM_PROMPT
-    if business_name:
-        system_prompt += f"\n\n## TARGET BUSINESS DETAILS:\n- You are calling a business named: '{business_name}'"
+    # Build dynamic instructions using state manager
+    system_prompt = conv_manager.get_system_prompt()
 
     # Start the session
     print("--- BOOM: Starting Session ---")
@@ -435,53 +584,274 @@ async def entrypoint(ctx: agents.JobContext):
         room=ctx.room,
         agent=OutboundAssistant(tools=list(fnc_ctx.function_tools.values()), instructions=system_prompt),
     )
+    fnc_ctx.session = session  # Inject session so tools can update state dynamically
     print("--- BOOM: Session Started Successfully ---")
+
+    # --- TIMEOUT LOGIC (Silence Detection) ---
+    _stop_monitor = asyncio.Event()
+
+    async def _timeout_monitor():
+        try:
+            # Give 15s leeway for call setup
+            await asyncio.sleep(15)
+            already_prompted = False
+            while not fnc_ctx.call_ended_by_tool and not _stop_monitor.is_set():
+                current_time = asyncio.get_event_loop().time()
+                silence_duration = current_time - fnc_ctx.last_user_speech_time
+
+                if silence_duration > 30:
+                    print("--- [TRACE-5 SILENCE] 30s silence. Dropping call silently. ---")
+                    fnc_ctx.call_ended_by_tool = True
+                    _stop_monitor.set()
+                    break
+                elif silence_duration > 18 and not already_prompted:
+                    already_prompted = True
+                    print("--- [TRACE-5 SILENCE] 18s silence. No fallback speech. ---")
+
+                if fnc_ctx.last_user_speech_time > current_time - 5:
+                    already_prompted = False
+
+                # ✅ Simple sleep — cancels cleanly via CancelledError
+                await asyncio.sleep(2)
+
+        except asyncio.CancelledError:
+            # ✅ Task cancelled cleanly — no 'destroyed but pending' warning
+            print("[CLEANUP] _timeout_monitor cancelled cleanly.")
+
+    # ✅ Store reference + named task
+    _timeout_task = asyncio.create_task(_timeout_monitor())
+    _timeout_task.set_name("timeout_monitor")
+
+    # ✅ Cancel task via ctx shutdown callback (more reliable than session.on("close"))
+    async def _cancel_timeout_task():
+        _stop_monitor.set()
+        if not _timeout_task.done():
+            _timeout_task.cancel()
+            try:
+                await _timeout_task
+            except asyncio.CancelledError:
+                pass
+
+    ctx.add_shutdown_callback(_cancel_timeout_task)
+
+    import time
 
     def _log_trace(msg_text):
         try:
+            ts = time.strftime("%H:%M:%S")
+            line = f"[{ts}] {msg_text}"
             with open("live_debug.txt", "a", encoding="utf-8") as f:
-                f.write(msg_text + "\n")
+                f.write(line + "\n")
+            print(line)  # Also print to console for real-time visibility
         except:
             pass
 
-    # --- TRACE EVENT LISTENERS ADDED FOR DEBUGGING ---
+    fnc_ctx.log_trace = _log_trace
+
+    # ══════════════════════════════════════════════════════════════════
+    # TRACE CASE 1: WhatsApp Number Trace
+    # Yeh check karega ki agent WhatsApp number kyun maang raha hai
+    # Agar is trace mein 'whatsapp_number' dikhta hai function call mein
+    # toh problem hai finalize_demo_booking ke tool description mein
+    # ══════════════════════════════════════════════════════════════════
+    @session.on("function_tools_executed")
+    def on_function_tools_trace_1(ev):
+        ev_str = str(ev)
+        _log_trace(f"[TRACE-1 WHATSAPP] function_tools_executed: {ev_str}")
+        # Check if agent tried to collect whatsapp_number
+        if "whatsapp" in ev_str.lower():
+            _log_trace(f"[TRACE-1 WHATSAPP] ⚠️  WHATSAPP NUMBER BEING REQUESTED! Tool args: {ev_str}")
+            _log_trace(f"[TRACE-1 WHATSAPP] Current conv state: {conv_manager.state}")
+            _log_trace(f"[TRACE-1 WHATSAPP] FIX: finalize_demo_booking should NOT take whatsapp_number param")
+
+    # ══════════════════════════════════════════════════════════════════
+    # TRACE CASE 2: Response Latency Trace
+    # Yeh measure karega kitna time lag raha hai user speech se agent
+    # response tak — 4-5 second delay ka exact source milega
+    # ══════════════════════════════════════════════════════════════════
+    _latency_tracker = {"user_speech_end": None, "llm_start": None}
+
+    @session.on("user_speech_committed")
+    def on_user_speech_latency_trace(msg):
+        _latency_tracker["user_speech_end"] = time.time()
+        msg_text = msg.text if hasattr(msg, 'text') else str(msg)
+        _log_trace(f"[TRACE-2 LATENCY] User speech committed at {time.strftime('%H:%M:%S')} — LLM processing starting... Text: '{msg_text}'")
+        
+        # ══════════════════════════════════════════════════════════════════
+        # TRACE CASE 7: Greeting Silence Tracker
+        # Check if STT picked up user speech right after greeting
+        # ══════════════════════════════════════════════════════════════════
+        if getattr(fnc_ctx, 'greeting_played', False) and not getattr(fnc_ctx, 'first_user_speech_received', False):
+            fnc_ctx.first_user_speech_received = True
+            _log_trace(f"[TRACE-7 GREETING SILENCE] 🎤 User answered greeting! STT heard: '{msg_text}'")
+            _log_trace(f"[TRACE-7 GREETING SILENCE] Waiting for LLM (Gemini) to generate reply...")
+
+    @session.on("agent_speech_committed")
+    def on_agent_speech_latency_trace(msg):
+        if _latency_tracker["user_speech_end"]:
+            latency = time.time() - _latency_tracker["user_speech_end"]
+            _log_trace(f"[TRACE-2 LATENCY] Agent speech committed at {time.strftime('%H:%M:%S')} — E2E Latency: {latency:.2f}s")
+            _latency_tracker["user_speech_end"] = None
+            
+        if getattr(fnc_ctx, 'first_user_speech_received', False) and not getattr(fnc_ctx, 'first_agent_reply_received', False):
+            fnc_ctx.first_agent_reply_received = True
+            _log_trace(f"[TRACE-7 GREETING SILENCE] 🤖 Agent replied successfully after greeting!")
+            
+        # ══════════════════════════════════════════════════════════════════
+        # TRACE CASE 6: Double Introduction Trace
+        # Yeh check karega ki agent kahin dobara apna naam (Nitin) ya 
+        # company ka naam (WebCraft Solutions) toh nahi bol raha
+        # ══════════════════════════════════════════════════════════════════
+        msg_text = msg.text.lower() if hasattr(msg, 'text') else str(msg).lower()
+        if "nitin" in msg_text or "webcraft" in msg_text:
+            if getattr(fnc_ctx, 'has_introduced_once', False):
+                _log_trace(f"[TRACE-6 INTRO] ⚠️  DOUBLE INTRO DETECTED! Agent re-introduced itself: {msg_text}")
+                _log_trace(f"[TRACE-6 INTRO] FIX: Ensure LLM prompt strictly forbids repeating the name.")
+            else:
+                fnc_ctx.has_introduced_once = True
+                _log_trace(f"[TRACE-6 INTRO] Agent introduced itself successfully (First Time).")
+            elapsed = time.time() - _latency_tracker["user_speech_end"]
+            _log_trace(f"[TRACE-2 LATENCY] ⏱️  Total response time: {elapsed:.2f}s (User→Agent)")
+            if elapsed > 3.0:
+                _log_trace(f"[TRACE-2 LATENCY] ⚠️  SLOW RESPONSE ({elapsed:.2f}s)! Possible causes:")
+                _log_trace(f"[TRACE-2 LATENCY]   → Groq API latency (check GROQ_MODEL={os.getenv('GROQ_MODEL', 'not set')})")
+                _log_trace(f"[TRACE-2 LATENCY]   → Tool call overhead (LLM deciding which tool to call)")
+                _log_trace(f"[TRACE-2 LATENCY]   → TTS generation delay (provider: {os.getenv('TTS_PROVIDER', 'not set')})")
+            _latency_tracker["user_speech_end"] = None
+
+    # ══════════════════════════════════════════════════════════════════
+    # TRACE CASE 3: Confirmation Phrase Detection Trace
+    # Yeh check karega ki jab user "thik hai link whatsapp kar do" bolta hai
+    # toh kya LLM finalize_demo_booking tool call kar raha hai ya nahi
+    # ══════════════════════════════════════════════════════════════════
+    _CONFIRMATION_KEYWORDS = [
+        "thik hai", "ठीक है", "theek hai", "haan bhej", "हाँ भेज", "bhej do",
+        "kar do", "whatsapp kar do", "link bhej", "send kar do", "ok bhej",
+        "haan kar do", "yes kar do", "bej do", "bhejdo", "yes send",
+        "confirm", "book kar", "schedule kar", "interested", "chahiye"
+    ]
+
+    @session.on("user_speech_committed")
+    def on_user_speech_confirmation_trace(msg):
+        if not msg.content:
+            return
+        content_lower = str(msg.content).lower()
+        state = conv_manager.state
+        _log_trace(f"[TRACE-3 CONFIRM] User said: '{msg.content}' | State: {state}")
+        
+        # Check if this looks like a confirmation in confirmation_pending state
+        matched_keywords = [kw for kw in _CONFIRMATION_KEYWORDS if kw in content_lower]
+        if matched_keywords:
+            _log_trace(f"[TRACE-3 CONFIRM] ✅ Confirmation keywords detected: {matched_keywords}")
+            if state == "confirmation_pending":
+                _log_trace(f"[TRACE-3 CONFIRM] State=confirmation_pending + keywords matched → finalize_demo_booking SHOULD be called")
+                _log_trace(f"[TRACE-3 CONFIRM] If tool NOT called in next 3s, LLM failed to recognize confirmation")
+            else:
+                _log_trace(f"[TRACE-3 CONFIRM] ⚠️  State is '{state}', not 'confirmation_pending' — initiate_booking_flow needed first")
+
+    @session.on("function_tools_executed")
+    def on_function_tools_confirm_trace(ev):
+        ev_str = str(ev)
+        if "finalize_demo_booking" in ev_str:
+            _log_trace(f"[TRACE-3 CONFIRM] ✅ finalize_demo_booking WAS called! Dashboard update should happen.")
+        elif "initiate_booking_flow" in ev_str:
+            _log_trace(f"[TRACE-3 CONFIRM] initiate_booking_flow called — state moving to confirmation_pending")
+        elif "mark_not_interested" in ev_str or "request_callback" in ev_str:
+            _log_trace(f"[TRACE-3 CONFIRM] ⚠️  Wrong tool called instead of finalize: {ev_str}")
+
+    # ══════════════════════════════════════════════════════════════════
+    # TRACE CASE 13: Triple Confirmation — Agent Speech After Call Ended
+    # Yeh detect karega ki agent call_ended state mein bhi bol raha hai
+    # ya nahin. Agar bol raha hai toh LLM instructions follow nahi kar raha
+    # ══════════════════════════════════════════════════════════════════
+    @session.on("agent_speech_committed")
+    def on_agent_speech_after_ended_trace(msg):
+        if conv_manager.state == "call_ended":
+            content_text = ""
+            if isinstance(msg.content, str):
+                content_text = msg.content
+            elif isinstance(msg.content, list):
+                for item in msg.content:
+                    if isinstance(item, str):
+                        content_text += item
+                    elif hasattr(item, 'text'):
+                        content_text += item.text
+            _log_trace(f"[TRACE-13 TRIPLE CONFIRM] 🚨 AGENT SPOKE AFTER CALL ENDED! State=call_ended but agent said: '{content_text[:100]}'")
+            _log_trace(f"[TRACE-13 TRIPLE CONFIRM] → This is the triple confirmation bug. LLM is ignoring call_ended instructions.")
+
+    # ══════════════════════════════════════════════════════════════════
+    # TRACE CASE 4: Farewell & Call Disconnect Trace
+    # Yeh track karega ki farewell ke baad call disconnect kyun nahi
+    # ho raha — phrase matching check karega
+    # ══════════════════════════════════════════════════════════════════
+    @session.on("agent_speech_committed")
+    def on_agent_speech_farewell_trace(msg):
+        content_text = ""
+        if isinstance(msg.content, str):
+            content_text = msg.content
+        elif isinstance(msg.content, list):
+            for item in msg.content:
+                if isinstance(item, str):
+                    content_text += item
+                elif hasattr(item, 'text'):
+                    content_text += item.text
+        
+        content_lower = content_text.lower()
+        _log_trace(f"[TRACE-4 FAREWELL] Agent said: '{content_text[:100]}...' | call_ended_by_tool={fnc_ctx.call_ended_by_tool}")
+        
+        farewell_check_phrases = [
+            "shubh ho", "शुभ हो", "shukriya", "शुक्रिया",
+            "team aapse kal", "great day", "aapka din shubh",
+            "call kar lunga", "din shubh", "shubh din",
+            "thank you", "shukriya", "dhanyawad", "धन्यवाद"
+        ]
+        matched_farewell = [p for p in farewell_check_phrases if p in content_lower]
+        
+        _log_trace(f"[TRACE-4 FAREWELL] Farewell phrases matched: {matched_farewell}")
+        
+        if matched_farewell and not fnc_ctx.call_ended_by_tool:
+            _log_trace(f"[TRACE-4 FAREWELL] ⚠️  FAREWELL DETECTED but call_ended_by_tool=False!")
+            _log_trace(f"[TRACE-4 FAREWELL]   → Tool (finalize/not_interested/callback) was NOT called before farewell")
+            _log_trace(f"[TRACE-4 FAREWELL]   → This is why disconnect is NOT happening")
+        elif matched_farewell and fnc_ctx.call_ended_by_tool:
+            _log_trace(f"[TRACE-4 FAREWELL] ✅ Farewell + call_ended_by_tool=True → disconnect will trigger in 4s")
+        elif not matched_farewell and fnc_ctx.call_ended_by_tool:
+            _log_trace(f"[TRACE-4 FAREWELL] ⚠️  call_ended_by_tool=True but NO farewell phrase matched!")
+            _log_trace(f"[TRACE-4 FAREWELL]   → Disconnect will NOT happen because phrase check failed")
+            _log_trace(f"[TRACE-4 FAREWELL]   → Agent said something without farewell phrase in list")
+
+    # --- ORIGINAL TRACE EVENT LISTENERS ---
     @session.on("state_changed")
     def on_state_changed(state):
-        _log_trace(f"--- TRACE: Agent State Changed: {state} ---")
+        _log_trace(f"[TRACE] Agent State Changed: {state}")
         
     @session.on("error")
-    def on_error(error):
-        _log_trace(f"--- TRACE ERROR: {error} ---")
-        
-    @session.on("user_speech_committed")
-    def on_user_speech_trace(msg):
-        _log_trace(f"--- TRACE: user_speech_committed: {msg} ---")
-        
-    @session.on("agent_speech_committed")
-    def on_agent_speech_trace(msg):
-        _log_trace(f"--- TRACE: agent_speech_committed: {msg} ---")
+    def on_session_error(err):
+        _log_trace(f"[TRACE ERROR]: type='error' error={err}")
+        _log_trace(f"[TRACE-7 GREETING SILENCE] ❌ A fatal error occurred that might have stopped the agent from replying: {err}")
         
     @session.on("user_input_transcribed")
     def on_user_input_trace(ev):
-        _log_trace(f"--- TRACE: user_input_transcribed: {ev} ---")
+        _log_trace(f"[TRACE] user_input_transcribed: {ev}")
         
     @session.on("conversation_item_added")
     def on_conversation_item_trace(ev):
-        _log_trace(f"--- TRACE: conversation_item_added: {ev} ---")
-        
-    @session.on("function_tools_executed")
-    def on_function_tools_trace(ev):
-        _log_trace(f"--- TRACE: function_tools_executed: {ev} ---")
-    # --------------------------------------------------
+        _log_trace(f"[TRACE] conversation_item_added: {ev}")
+    # ══════════════════════════════════════════════════════════════════
 
     # Listen for transcript events for debugging
     @session.on("user_speech_committed")
     def on_user_speech(msg: llm.ChatMessage):
+        fnc_ctx.last_user_speech_time = asyncio.get_event_loop().time()
         if msg.content:
             logger.info(f"USER: {msg.content}")
             print(f"\n--- BOOM USER SAID: {msg.content} ---")
             with open("chat_debug.txt", "a", encoding="utf-8") as f:
                 f.write(f"USER: {msg.content}\n")
+            
+            # Log state transitions
+            with open("call_logs.jsonl", "a", encoding="utf-8") as log_file:
+                log_file.write(json.dumps({"type": "user_speech", "content": msg.content, "state": conv_manager.state}) + "\n")
 
     @session.on("agent_speech_committed")
     def on_agent_speech(msg: llm.ChatMessage):
@@ -491,8 +861,10 @@ async def entrypoint(ctx: agents.JobContext):
             with open("chat_debug.txt", "a", encoding="utf-8") as f:
                 f.write(f"AGENT: {msg.content}\n")
             
-            # --- FAIL-SAFE CALL HANGUP ---
-            # Agar LLM tool call karna bhool jaye, par Nitin farewell bol de, toh call 4s me cut ho jayegi
+            with open("call_logs.jsonl", "a", encoding="utf-8") as log_file:
+                log_file.write(json.dumps({"type": "agent_speech", "content": msg.content, "state": conv_manager.state}) + "\n")
+            
+            # --- GRACEFUL TERMINATION LOGIC ---
             content_text = ""
             if isinstance(msg.content, str):
                 content_text = msg.content
@@ -504,22 +876,62 @@ async def entrypoint(ctx: agents.JobContext):
                         content_text += item.text
             
             content_lower = content_text.lower()
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # TRACE-9 LATENCY BREAKDOWN
+            # Logs exact milliseconds taken by VAD, LLM, and TTS
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            if hasattr(msg, "metrics") and msg.metrics:
+                m = msg.metrics
+                e2e = m.get("e2e_latency", 0)
+                llm_ttft = m.get("llm_node_ttft", 0)
+                tts_ttfb = m.get("tts_node_ttfb", 0)
+                print(f"--- [TRACE-9 LATENCY BREAKDOWN] E2E: {e2e:.2f}s | LLM TTFT: {llm_ttft:.2f}s | TTS TTFB: {tts_ttfb:.2f}s ---")
+                logger.info(f"[TRACE-9 LATENCY] E2E: {e2e:.2f}s, LLM: {llm_ttft:.2f}s, TTS: {tts_ttfb:.2f}s")
+            
+            content_lower = content_text.lower()
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # TRACE CASE 4 & TRACE-8 FAREWELL HANGUP FIX
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             farewell_phrases = [
-                "shubh ho", "शुभ हो", 
-                "demo bhej", "डेमो भेज", 
-                "keemti samay", "कीमती समय", 
+                "shubh ho", "शुभ ho", 
+                "shukriya", "शुक्रिया",
+                "team aapse kal connect karegi",
                 "great day", "ग्रेट डे",
-                "thank you, main aapko whatsapp",
                 "aapka din shubh",
-                "bhej dunga", "भेज दूंगा",
-                "aapka din shubh ho"
+                "call kar lunga",
+                # ✅ NEW ADDITIONS:
+                "din shubh",        # "aapka din shubh ho"
+                "dhanyawad",        # "dhanyawad"
+                "धन्यवाद",          # Hindi dhanyawad
+                "thank you",        # finalize_demo_booking return karta hai yeh
+                "have a great",     # finalize return phrase
+                "baad me call",     # callback phrase
+                "samay dene",       # not_interested phrase
+                "keemti samay",     # not_interested phrase
+                "kal connect",      # demo confirmed phrase
+                "schedule ho gaya", # demo confirmed phrase
             ]
-            if any(phrase in content_lower for phrase in farewell_phrases):
-                print("--- [FAIL-SAFE] Farewell detected! Calling shutdown NOW ---")
-                try:
+            
+            matched_phrase = [p for p in farewell_phrases if p in content_lower]
+            
+            print(f"--- [TRACE-8 FAREWELL HANGUP] call_ended_by_tool={fnc_ctx.call_ended_by_tool}, matched={matched_phrase}, text='{content_text[:30]}...' ---")
+            
+            # Only terminate if a tool ended the call AND a farewell phrase was spoken
+            if fnc_ctx.call_ended_by_tool and matched_phrase:
+                print(f"--- [TRACE-8 FAREWELL HANGUP] ✅ Farewell detected! Waiting 4s for TTS to flush... ---")
+                
+                async def _graceful_shutdown():
+                    print("--- [TRACE-8 FAREWELL HANGUP] Sleep started... ---")
+                    _log_trace(f"[TRACE-10 VOBIZ HANGUP] Graceful hangup initiated. Waiting 2s for TTS flush...")
+                    await asyncio.sleep(2)
+                    print("--- [TRACE-8 FAREWELL HANGUP] Sleep ended. Shutting down room now... ---")
+                    _log_trace(f"[TRACE-10 VOBIZ HANGUP] 🛑 Triggering ctx.shutdown() to terminate the SIP / Vobiz call connection...")
+                    if getattr(fnc_ctx, 'egress_id', None):
+                        await _stop_recording(fnc_ctx.egress_id)
                     ctx.shutdown()
-                except Exception as e:
-                    print(f"--- [FAIL-SAFE] Error: {e}")
+                    _log_trace(f"[TRACE-10 VOBIZ HANGUP] ✅ ctx.shutdown() completed. Agent has hung up the call.")
+                
+                asyncio.ensure_future(_graceful_shutdown())
 
     should_dial = False
     if phone_number:
@@ -553,7 +965,13 @@ async def entrypoint(ctx: agents.JobContext):
             )
             print("[TRACE] Call picked up or ringing ended!")
             call_answered = True
-            
+
+            # ✅ FIX: Timer reset karo — abhi customer ne call uthaya hai
+            # Pehle last_user_speech_time agent init pe set tha (bahut pehle)
+            # Isse silence timer prematurely fire ho jaata tha
+            fnc_ctx.last_user_speech_time = asyncio.get_event_loop().time()
+            print("[TRACE] Silence timer RESET on call answer.")
+
             # ✅ Customer ne call uthaya - dashboard mein "On Call" status set karo
             logger.info("Customer answered! Notifying dashboard: on_call")
             asyncio.ensure_future(_notify_dashboard(dashboard_url, lead_id, "on_call"))
@@ -577,28 +995,55 @@ async def entrypoint(ctx: agents.JobContext):
             def on_participant_left(participant):
                 if "sip_" in participant.identity:
                     logger.info(f"SIP participant {participant.identity} disconnected - call ended")
-                    print(f"--- BOOM: Call ended, participant {participant.identity} left ---")
-                    if not getattr(fnc_ctx, 'call_ended_by_tool', False):
-                        asyncio.ensure_future(_notify_dashboard(dashboard_url, lead_id, "not_confirmed"))
+                    _log_trace(f"[TRACE-10 VOBIZ HANGUP] 🚪 SIP Participant '{participant.identity}' disconnected from Room. Vobiz PSTN call severed!")
+
+                    # ✅ FIX: Hamesha dashboard update karo — chahe tool chala ho ya na chala ho
+                    # final_status tool ne set kiya hoga, warna default "not_confirmed" (customer ne call kaata)
+                    resolved_status = getattr(fnc_ctx, 'final_status', None) or "not_confirmed"
+                    _log_trace(f"[TRACE-10 VOBIZ HANGUP] 📊 Final call outcome resolved: '{resolved_status}'. Updating dashboard...")
+                    asyncio.ensure_future(_notify_dashboard(dashboard_url, lead_id, resolved_status))
+
                     if getattr(fnc_ctx, 'egress_id', None):
                         asyncio.ensure_future(_stop_recording(fnc_ctx.egress_id))
                     async def _delayed_shutdown():
                         await asyncio.sleep(2)
+                        _log_trace(f"[TRACE-10 VOBIZ HANGUP] 🛑 Severing remaining agent connection via ctx.shutdown()...")
                         ctx.shutdown()
+                        _log_trace(f"[TRACE-10 VOBIZ HANGUP] ✅ Call lifecycle completely ended.")
                     asyncio.ensure_future(_delayed_shutdown())
             
-            # Let audio track establish extremely fast
-            await asyncio.sleep(0.5)
+            # Let audio track establish (minimal delay)
+            await asyncio.sleep(0.1)
             
             try:
                 if hasattr(session, "say"):
-                    print(f"[TRACE] Calling session.say() with allow_interruptions=False")
-                    # Set allow_interruptions to False so background noise doesn't immediately cut it off!
+                    print(f"[TRACE] Calling session.say() with allow_interruptions=True")
                     if asyncio.iscoroutinefunction(session.say):
-                        await session.say(greeting, allow_interruptions=False)
+                        await session.say(greeting, allow_interruptions=True)
                     else:
-                        session.say(greeting, allow_interruptions=False)
-                    print("[TRACE] session.say() executed successfully.")
+                        session.say(greeting, allow_interruptions=True)
+
+                    _log_trace(f"[TRACE-7 GREETING SILENCE] ✅ Greeting played via session.say(). Agent is now listening for User...")
+                    fnc_ctx.greeting_played = True
+
+                    # ══════════════════════════════════════════════════════════════════
+                    # TRACE CASE 12: Initial Greeting Injection Trace
+                    # Append the spoken greeting to chat_ctx.messages so the LLM is
+                    # aware of what was already said, preventing a double introduction.
+                    # ══════════════════════════════════════════════════════════════════
+                    _log_trace(f"[TRACE-12 GREETING INJECTION] 📝 Appending initial greeting to chat context to prevent double introduction: '{greeting}'")
+                    session.chat_ctx.messages.append(
+                        llm.ChatMessage(
+                            role="assistant",
+                            content=greeting
+                        )
+                    )
+
+                    # ✅ FIX: Greeting khatam hone ke baad timer phir reset karo
+                    # Yahi woh moment hai jab customer ko respond karna hai
+                    # Ab se hi 18s ka silence window shuru hoga
+                    fnc_ctx.last_user_speech_time = asyncio.get_event_loop().time()
+                    print("[TRACE-7 GREETING SILENCE] Greeting done. Silence timer RESET. Waiting for customer response...")
                 else:
                     print("--- BOOM: session.say() method not found on session object ---")
             except Exception as e:
