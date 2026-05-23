@@ -877,6 +877,27 @@ async def entrypoint(ctx: agents.JobContext):
             
             content_lower = content_text.lower()
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # TRACE CASE 14: Intro Phrase Repetition Detection
+            # Detect when agent repeats "WebCraft Solutions se baat kar raha hoon"
+            # ya "1 minute ka samay hai" baar baar
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            _repeat_keywords = ["webcraft solutions", "1 minute", "ek minute"]
+            if any(kw in content_lower for kw in _repeat_keywords):
+                repeat_count = getattr(fnc_ctx, '_intro_repeat_count', 0) + 1
+                fnc_ctx._intro_repeat_count = repeat_count
+                _log_trace(f"[TRACE-14 INTRO REPEAT] Count #{repeat_count} | State: {conv_manager.state} | Said: '{content_text[:80]}'")
+                if repeat_count == 1:
+                    _log_trace(f"[TRACE-14 INTRO REPEAT] First occurrence (normal).")
+                elif repeat_count >= 2:
+                    _log_trace(f"[TRACE-14 INTRO REPEAT] ⚠️ REPEATED! Agent said intro phrase {repeat_count} times!")
+                    _log_trace(f"[TRACE-14 INTRO REPEAT] Root causes:")
+                    _log_trace(f"[TRACE-14 INTRO REPEAT]   → LLM is stuck in GREETING state and not transitioning to PITCH")
+                    _log_trace(f"[TRACE-14 INTRO REPEAT]   → Customer might be giving unclear responses (like 'hmm', 'achha')")
+                    _log_trace(f"[TRACE-14 INTRO REPEAT]   → transition_state tool was NOT called by LLM")
+                    _log_trace(f"[TRACE-14 INTRO REPEAT]   → STATE_PROMPTS.greeting instructions may not be strict enough")
+                    _log_trace(f"[TRACE-14 INTRO REPEAT] FIX: Ensure LLM understands to transition to pitch after customer confirms")
+            
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # TRACE-9 LATENCY BREAKDOWN
             # Logs exact milliseconds taken by VAD, LLM, and TTS
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -952,7 +973,10 @@ async def entrypoint(ctx: agents.JobContext):
         # Clean phone number: remove spaces, dashes, and ensure only digits
         dial_number = "".join(filter(str.isdigit, phone_number))
         
-        print(f"[TRACE] Dialing {dial_number} on trunk {config.SIP_TRUNK_ID}")
+        # ══════════════════════════════════════════════════════════════════
+        # TRACE CASE 14: SIP Outbound Dialing Trace
+        # ══════════════════════════════════════════════════════════════════
+        _log_trace(f"[TRACE-14 SIP DIAL] Dialing {dial_number} on trunk {config.SIP_TRUNK_ID}...")
         try:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
@@ -1055,6 +1079,7 @@ async def entrypoint(ctx: agents.JobContext):
             
         except Exception as e:
             logger.error(f"Failed to place outbound call: {e}")
+            _log_trace(f"[TRACE-14 SIP DIAL] 🚨 Failed to place outbound call! Error: {e}")
             # Call failed - update status to no_answer
             await _notify_dashboard(dashboard_url, lead_id, "no_answer")
             ctx.shutdown()
