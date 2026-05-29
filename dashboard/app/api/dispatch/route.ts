@@ -5,7 +5,7 @@ import { getLeads } from '@/lib/data-store';
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { phoneNumber, prompt, modelProvider, voice, leadId } = body;
+        const { phoneNumber, prompt, leadId } = body;
 
         if (!phoneNumber) {
             return NextResponse.json({ error: "Phone number is required" }, { status: 400 });

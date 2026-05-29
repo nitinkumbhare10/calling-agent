@@ -49,6 +49,7 @@ export default function Home() {
   const [stats, setStats] = useState<Stats>(DEFAULT_STATS);
   const [loading, setLoading] = useState(true);
 
+
   const fetchLeads = useCallback(async () => {
     try {
       const res = await fetch('/api/leads');
@@ -90,8 +91,6 @@ export default function Home() {
           phoneNumber: lead.phoneNumber,
           leadId: lead.id,
           prompt: `You are calling ${lead.businessName}. Use their business name in the conversation.`,
-          modelProvider: 'groq',
-          voice: 'onyx',
         }),
       });
       const dispatchData = await dispatchRes.json();
@@ -149,6 +148,9 @@ export default function Home() {
               </span>
               <span className="text-green-400">Agent Online</span>
             </div>
+
+
+
             <button
               onClick={() => fetchLeads()}
               className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-all text-gray-400 hover:text-white"

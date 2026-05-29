@@ -27,8 +27,8 @@ async def main():
         print("Error: Missing LiveKit credentials")
         return
 
-    if not (sip_address and username and password):
-        print("Error: Missing SIP credentials (VOBIZ_SIP_DOMAIN, VOBIZ_USERNAME, VOBIZ_PASSWORD)")
+    if not sip_address:
+        print("Error: Missing SIP credential (VOBIZ_SIP_DOMAIN)")
         return
 
     lkapi = api.LiveKitAPI(url=url, api_key=key, api_secret=secret)

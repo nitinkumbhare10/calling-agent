@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
                 const metadata = JSON.stringify({
                     phone_number: phoneNumber,
-                    user_prompt: prompt || ""
+                    user_prompt: prompt || "",
                 });
 
                 await roomService.createRoom({

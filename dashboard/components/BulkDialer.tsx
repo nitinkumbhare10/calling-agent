@@ -8,6 +8,8 @@ export default function BulkDialer() {
     const [prompt, setPrompt] = useState('');
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [results, setResults] = useState<any[]>([]);
+    const [modelProvider, setModelProvider] = useState('groq');
+    const [voice, setVoice] = useState('aura-orion-en');
 
     const handleBulkDispatch = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -26,7 +28,7 @@ export default function BulkDialer() {
             const res = await fetch('/api/queue', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ numbers, prompt }),
+                body: JSON.stringify({ numbers, prompt, modelProvider, voice }),
             });
 
             const data = await res.json();
@@ -80,6 +82,33 @@ export default function BulkDialer() {
                             onChange={(e) => setPrompt(e.target.value)}
                             className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent text-white placeholder-gray-600 outline-none transition-all duration-300"
                         />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-sm text-gray-400 font-medium">Model provider</label>
+                            <select
+                                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-green-500"
+                                value={modelProvider}
+                                onChange={(e) => setModelProvider(e.target.value)}
+                            >
+                                <option value="groq">Groq (Llama 3)</option>
+                                <option value="gemini">Gemini (2.5 Flash)</option>
+                            </select>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-gray-400 font-medium">Voice</label>
+                            <select
+                                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white outline-none focus:ring-2 focus:ring-green-500"
+                                value={voice}
+                                onChange={(e) => setVoice(e.target.value)}
+                            >
+                                <option value="aura-orion-en">Orion (Deepgram)</option>
+                                <option value="aura-asteria-en">Asteria (Deepgram)</option>
+                                <option value="anushka">Anushka (Indian - Sarvam)</option>
+                                <option value="aravind">Aravind (Indian - Sarvam)</option>
+                            </select>
+                        </div>
                     </div>
 
                     <button
