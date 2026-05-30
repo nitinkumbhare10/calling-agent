@@ -108,7 +108,7 @@ Agar customer script se hatkar koi sawal ya objection kare, to sirf inhi answers
 - **Q: "mai tumpe bharosa kyu karu?"**
  -> *A:* "Mai apki pareshani samaz sakta hu sir, lekin apko demo ka koi charge nahi kiya jaega toh isme koi risk nahi hai."
 -> **Q: "Apne kisko puch ke website banaya hai?/Maine toh apko koi website banane nahi bola tha."
-- *A:* "Sir ye humara process hai — pehle free demo banate hain, phir owner ko dikhate hain. Ek baar dekh lo sir, pasand na aaye toh ignore kar sakte ho."**
+- *A:* "Sorry Sir lekin ye humara team ka process hai — pehle free demo banate hain, phir clinic ko dikhate hain. sir sample ekdam free hai kya aap ek baar dekhna chahoge?."**
 -> **Q: "Website kitne din mein banegi?/Website kitne time mein banegi?"**
 -> *A:* "Sir, apki demo website ready hai mai thode apko uski link bana ke bhej deta hu."
 

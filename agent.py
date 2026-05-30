@@ -330,10 +330,10 @@ class CallStateTools(llm.ToolContext):
                         await self.session.say(farewell, allow_interruptions=False)
                     else:
                         self.session.say(farewell, allow_interruptions=False)
-                    await asyncio.sleep(5.0)  # Let TTS finish speaking the long sentence
+                    await asyncio.sleep(7.0)  # Let TTS finish speaking the long sentence
                 except Exception as e:
                     print(f"[FAREWELL] say() error: {e}")
-                    await asyncio.sleep(5.0)
+                    await asyncio.sleep(7.0)
                 finally:
                     if getattr(self, 'egress_id', None):
                         await _stop_recording(self.egress_id)
@@ -363,9 +363,9 @@ class CallStateTools(llm.ToolContext):
                         await self.session.say(farewell, allow_interruptions=False)
                     else:
                         self.session.say(farewell, allow_interruptions=False)
-                    await asyncio.sleep(5.0)
+                    await asyncio.sleep(7.0)
                 except Exception as e:
-                    await asyncio.sleep(5.0)
+                    await asyncio.sleep(7.0)
                 finally:
                     if getattr(self, 'egress_id', None):
                         await _stop_recording(self.egress_id)
@@ -400,9 +400,9 @@ class CallStateTools(llm.ToolContext):
                         await self.session.say(farewell, allow_interruptions=False)
                     else:
                         self.session.say(farewell, allow_interruptions=False)
-                    await asyncio.sleep(5.0)
+                    await asyncio.sleep(7.0)
                 except Exception as e:
-                    await asyncio.sleep(5.0)
+                    await asyncio.sleep(7.0)
                 finally:
                     if getattr(self, 'egress_id', None):
                         await _stop_recording(self.egress_id)
