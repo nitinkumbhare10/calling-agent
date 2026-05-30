@@ -113,16 +113,26 @@ def _build_llm(config_provider: str = None):
         )
     
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # Groq Fallback
+    # Groq Fallback with Rotation
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     groq_model = os.getenv("GROQ_MODEL", config.GROQ_MODEL)
     print(f"[LLM] Building Groq LLM with model: {groq_model}")
     logger.info(f"Using Groq LLM (model: {groq_model})")
     
-    client = openai_client.AsyncOpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=os.getenv("GROQ_API_KEY"),
-    )
+    import time
+    from groq_rotator import rotator
+    
+    # Get rotated client
+    client = rotator.get_next_key()
+    active_key = rotator.current_key.name if rotator.current_key else "Unknown"
+    used_tokens = rotator.current_key.daily_tokens_used if rotator.current_key else 0
+    
+    # Write to live_debug.txt for verification tracking (TRACE-15)
+    ts = time.strftime("%H:%M:%S")
+    rotation_trace = f"[{ts}] [TRACE-15 API ROTATION] 🔑 Outbound call started. API key rotated! Active key: '{active_key}' (Daily usage: {used_tokens}/{rotator.daily_limit} tokens)"
+    with open("live_debug.txt", "a", encoding="utf-8") as f:
+        f.write(rotation_trace + "\n")
+    print(rotation_trace)
     
     return openai.LLM(
         client=client,
@@ -831,6 +841,15 @@ async def entrypoint(ctx: agents.JobContext):
         logger.info(f"AGENT: {content_str}")
         print(f"--- BOOM AGENT SAID: {content_str} ---\n")
         
+        # Estimate token usage and report it to the rotator
+        try:
+            from groq_rotator import rotator
+            # standard estimate: ~1 token per 4 chars + 300 tokens context buffer
+            est_tokens = int(len(content_str) / 4) + 300
+            rotator.report_usage(est_tokens)
+        except Exception as e:
+            print(f"[TOKEN REPORT ERROR] Failed to report usage: {e}")
+            
         # Write to log files
         with open("chat_debug.txt", "a", encoding="utf-8") as f:
             f.write(f"AGENT: {content_str}\n")
