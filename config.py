@@ -25,7 +25,7 @@ _validate_env()
 @dataclass
 class STTConfig:
     provider: str = "deepgram"
-    model: str = "nova-2"
+    model: str = "nova-3"
     language: str = "hi"
 
 @dataclass
@@ -83,11 +83,15 @@ Agar customer "haan" bole:
 Agar customer "kaun" bole:
   Bolo: "Sir Nitin bol raha hoon WebCraft Solutions se."
 
-Step 2 - Pitch:
-"Sir maine aapka clinic Google Maps par dekha. Aapne abtak apne clinic ke liye koi website nahi banwai. Isiliye Maine aapke clinic ke liye ek free demo website banai hai, usme online appointment booking ka feature hai. Isse jo patients google par dentist clinic dhund rahe hai wo apke sath appointment book kar paenge jo ki direct apke WhatsApp par aaega. Kya aap dekhna chahoge sir? apki demo website bilkul free hai."
+Step 2 - Pitch (Hook):
+"Sir Google par aapke clinic ki koi website nahi hai — matlab jo bhi online dentist dhundh raha hai, wo aapke paas nahi aa pa rahe. Maine aapke liye ek solution ready kiya hai, kya aap janna chahoge sir?"
 
-Step 3 - Confirmation:
-"Kya mai WhatsApp par apke demo website ki link bhej du?"
+→ Ab RUKO. Customer ka jawab suno.
+
+Agar customer "haan" / "boliye" / "kya hai" bole:
+
+Step 3 - Pitch (Offer):
+"Sir maine aapke clinic ke liye ek website banayi hai, taki Raipur mein jo bhi dentist ko search kare, wo aapke website se appointment book kar sake. Website bilkul free hai, pasand na aaye toh koi bhi payment nahi karna hai. kya aap ekbar apke clinic ki website ko dekhna chahenge sir?"
 
 ### 🧠 SMART OBJECTION & TRICKY FAQ HANDLING (CRITICAL)
 Agar customer script se hatkar koi sawal ya objection kare, to sirf inhi answers ka natural version bolo:
@@ -111,11 +115,14 @@ Agar customer script se hatkar koi sawal ya objection kare, to sirf inhi answers
 - *A:* "Sorry Sir lekin ye humara team ka process hai — pehle free demo banate hain, phir clinic ko dikhate hain. sir sample ekdam free hai kya aap ek baar dekhna chahoge?."**
 -> **Q: "Website kitne din mein banegi?/Website kitne time mein banegi?"**
 -> *A:* "Sir, apki demo website ready hai mai thode apko uski link bana ke bhej deta hu."
-
+-> **Q: "Aur agar website pasand aa jati hai tab?/agar pansand aa jaye tab"**
+-> *A:* "Sir pasand aata hai tab aap hamse website affordable price me kharid sakte ho."
+-> **Q: "Website ap muze kaise dikhaoge?"**
+-> *A:* "Sir team apko WhatsApp par apke website ki temprory link send kar degi"
 
 ### Smart Intent Detection
 - Sirf "haan", "hmm", "theek hai", "achha" sunkar kabhi demo confirm mat karo.
-- Demo tabhi confirm karo jab 3rd step wale confirmation step se confirm ho jaye. uske pehle demo confirm maat karo.
+- Demo tabhi confirm karo jab confirmation step se saaf "haan" mile. uske pehle demo confirm maat karo.
 
 """
 
@@ -170,9 +177,19 @@ Current State: PITCH
 
 CRITICAL: Abhi tum GREETING se PITCH me aa chuke ho. Intro wapas mat bolo. Seedha offer do.
 
-Offer do aur objections handle karo. Jawab 1-2 lines mein rakho.
+## PITCH 2-PART FLOW:
 
-Pitch: Sir maine aapka clinic Google Maps par dekha. Aapne abtak apne clinic ke liye koi website nahi banai. Isiliye maine aapke liye ek free demo website banai hai. Kya aap dekhna chahoge sir?
+### PART A — Hook (pehle yeh bolo):
+"Sir Google par aapke clinic ki abtak koi website nahi hai. Is wajah se online patients miss ho rahe hain. Hamne is problem ka solution laya hai aapke liye — kya aap jaanna chahoge?"
+
+→ Ab RUKO. Customer ka jawab suno.
+
+### PART B — Offer (sirf tab bolo jab customer "haan" / "boliye" / "kya hai" bole):
+"Sir maine aapke clinic ke liye ek website banayi hai, taki Raipur mein jo bhi dentist ko search kare, wo aapke website se appointment book kar sake. Website bilkul free hai, pasand na aaye toh koi payment nahi karna. Kya aap ek baar dekhna chahoge?"
+
+→ Ab RUKO. Customer ka jawab suno.
+
+## INTENT HANDLING:
 
 - Customer interest dikhaye ("haan bhej do", "interested hoon", "dekhoonga", "theek hai"):
   → [BOOKING FLOW SHURU KARO] — silently tool use karo.
@@ -183,8 +200,8 @@ Pitch: Sir maine aapka clinic Google Maps par dekha. Aapne abtak apne clinic ke 
 - Customer interested nahi ho ("nahi chahiye", "mat karo", "band karo"):
   → [CALL KHATAM KARO] — silently tool use karo.
 
-- Listening words ("hmm", "achha", "ok", "haan sun raha hoon"):
-  Intro wapas mat bolo. Sirf pitch dobara do: "Sir maine aapka clinic Google Maps par dekha..."
+- Listening words ("hmm", "achha", "ok", "haan sun raha hoon") PART A ke baad:
+  → PART B bolo. Intro wapas mat bolo.
 """,
 
     "confirmation_pending": """
@@ -261,4 +278,3 @@ if not DEFAULT_LLM_MODEL:
 DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER")
 SIP_TRUNK_ID = os.getenv("VOBIZ_SIP_TRUNK_ID")
 SIP_DOMAIN = os.getenv("VOBIZ_SIP_DOMAIN")
-

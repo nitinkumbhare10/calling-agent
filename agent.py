@@ -647,8 +647,11 @@ async def entrypoint(ctx: agents.JobContext):
                 min_speech_duration=0.15    # Slightly lower to catch short replies faster
             ),
             stt=deepgram.STT(
-                model=config.STT_MODEL, 
-                language=config.STT_LANGUAGE, 
+                model="nova-3", 
+                language="hi",
+                punctuate=False,
+                smart_format=False,
+                endpointing_ms=400,
                 interim_results=True
             ), 
             llm=_build_llm(m_provider),
@@ -660,7 +663,7 @@ async def entrypoint(ctx: agents.JobContext):
         # Extreme fallback without OpenAI defaults
         session = AgentSession(
             vad=silero.VAD.load(min_silence_duration=0.5),
-            stt=deepgram.STT(model="nova-2", language="hi"),
+            stt=deepgram.STT(model="nova-3", language="hi", punctuate=False, smart_format=False, endpointing_ms=400, interim_results=True),
             llm=_build_llm(m_provider),
             tts=deepgram.TTS(model=config.DEFAULT_TTS_VOICE),
         )
@@ -860,7 +863,12 @@ async def entrypoint(ctx: agents.JobContext):
 
         # TRACE CASE 2 & 7: Agent speech committed latency tracker
         if _latency_tracker["user_speech_end"]:
-            latency = time.time() - _latency_tracker["user_speech_end"]
+            # Use LiveKit's built-in e2e_latency for accurate True Latency (time to first byte)
+            if hasattr(msg, "metrics") and msg.metrics and "e2e_latency" in msg.metrics:
+                latency = msg.metrics["e2e_latency"]
+            else:
+                latency = time.time() - _latency_tracker["user_speech_end"]
+
             _log_trace(f"[TRACE-2 LATENCY] Agent speech committed at {time.strftime('%H:%M:%S')} — E2E Latency: {latency:.2f}s")
             if latency > 3.0:
                 _log_trace(f"[TRACE-2 LATENCY] ⚠️  SLOW RESPONSE ({latency:.2f}s)! Possible causes:")
