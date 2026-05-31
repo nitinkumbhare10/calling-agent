@@ -7,6 +7,7 @@ import CSVUploader from '@/components/CSVUploader';
 import LeadsTable from '@/components/LeadsTable';
 import CallHistory from '@/components/CallHistory';
 import CallDispatcher from '@/components/CallDispatcher';
+import QuotaBar from '@/components/QuotaBar';
 
 type Tab = 'overview' | 'leads' | 'calls' | 'quick-call';
 
@@ -28,7 +29,6 @@ interface Stats {
   notConfirmed: number;
   noAnswer: number;
   callback: number;
-  creditExhausted?: number;
   totalCalls: number;
 }
 
@@ -41,7 +41,7 @@ const TABS = [
 
 const DEFAULT_STATS: Stats = {
   totalLeads: 0, pending: 0, calling: 0, onCall: 0, demoConfirmed: 0,
-  notConfirmed: 0, noAnswer: 0, callback: 0, creditExhausted: 0, totalCalls: 0,
+  notConfirmed: 0, noAnswer: 0, callback: 0, totalCalls: 0,
 };
 
 export default function Home() {
@@ -228,6 +228,9 @@ export default function Home() {
           </nav>
         </div>
       </header>
+
+      {/* Quota Health Bar */}
+      <QuotaBar />
 
       {/* Content */}
       <div className="relative z-10 max-w-7xl mx-auto px-6 py-8">

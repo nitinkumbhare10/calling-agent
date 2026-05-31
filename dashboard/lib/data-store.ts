@@ -13,7 +13,7 @@ export interface Lead {
   id: string;
   businessName: string;
   phoneNumber: string;
-  status: 'pending' | 'calling' | 'on_call' | 'demo_confirmed' | 'not_confirmed' | 'no_answer' | 'callback' | 'credit_exhausted';
+  status: 'pending' | 'calling' | 'on_call' | 'demo_confirmed' | 'not_confirmed' | 'no_answer' | 'callback';
   callDate: string | null;
   notes: string;
   campaignId: string;
@@ -176,7 +176,6 @@ export function getStats() {
     notConfirmed: leads.filter(l => l.status === 'not_confirmed').length,
     noAnswer: leads.filter(l => l.status === 'no_answer').length,
     callback: leads.filter(l => l.status === 'callback').length,
-    creditExhausted: leads.filter(l => l.status === 'credit_exhausted').length,
     totalCalls: calls.length,
   };
 }

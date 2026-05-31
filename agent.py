@@ -1132,7 +1132,7 @@ async def entrypoint(ctx: agents.JobContext):
                     session.chat_ctx.messages.append(
                         llm.ChatMessage(
                             role="assistant",
-                            content=greeting
+                            content=[greeting]
                         )
                     )
 
@@ -1158,7 +1158,6 @@ async def entrypoint(ctx: agents.JobContext):
             error_str = str(e)
             status = "no_answer"
             if "payment required" in error_str.lower() or "402" in error_str:
-                status = "credit_exhausted"
                 _log_trace(f"[TRACE-14 SIP DIAL] 🚨 Vobiz credit exhausted detected (SIP status 'Payment Required').")
             
             # Call failed - update status on dashboard

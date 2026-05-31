@@ -1,26 +1,6 @@
 {
-    "last_used_key_name": "GROQ_KEY_2",
+    "last_used_key_name": "GROQ_KEY_6",
     "daily_usage": {
-        "GROQ_KEY_3": {
-            "daily_tokens_used": 0,
-            "exhausted": false,
-            "last_used_timestamp": 1780207591.8702824
-        },
-        "GROQ_KEY_4": {
-            "daily_tokens_used": 0,
-            "exhausted": false,
-            "last_used_timestamp": 1780207621.3015432
-        },
-        "GROQ_KEY_5": {
-            "daily_tokens_used": 0,
-            "exhausted": false,
-            "last_used_timestamp": 1780207653.3512335
-        },
-        "GROQ_KEY_6": {
-            "daily_tokens_used": 0,
-            "exhausted": false,
-            "last_used_timestamp": 1780211318.121121
-        },
         "GROQ_KEY_7": {
             "daily_tokens_used": 0,
             "exhausted": false,
@@ -50,6 +30,26 @@
             "daily_tokens_used": 627,
             "exhausted": false,
             "last_used_timestamp": 1780212047.0413954
+        },
+        "GROQ_KEY_3": {
+            "daily_tokens_used": 374,
+            "exhausted": false,
+            "last_used_timestamp": 1780223015.7847872
+        },
+        "GROQ_KEY_4": {
+            "daily_tokens_used": 0,
+            "exhausted": false,
+            "last_used_timestamp": 1780223068.5977743
+        },
+        "GROQ_KEY_5": {
+            "daily_tokens_used": 1004,
+            "exhausted": false,
+            "last_used_timestamp": 1780225161.0338998
+        },
+        "GROQ_KEY_6": {
+            "daily_tokens_used": 0,
+            "exhausted": false,
+            "last_used_timestamp": 1780225215.595122
         }
     },
     "last_reset_date": "2026-05-31"

@@ -11,7 +11,6 @@ interface StatsData {
   notConfirmed: number;
   noAnswer: number;
   callback: number;
-  creditExhausted?: number;
   totalCalls: number;
 }
 
@@ -22,12 +21,11 @@ export default function StatsCards({ stats }: { stats: StatsData }) {
     { label: 'On Call 🔴', value: stats.onCall, icon: PhoneIncoming, color: 'from-emerald-400 to-green-500', bg: 'bg-emerald-500/15', border: 'border-emerald-400/40', pulse: true },
     { label: 'Demo Confirmed', value: stats.demoConfirmed, icon: CheckCircle, color: 'from-green-500 to-emerald-500', bg: 'bg-green-500/10', border: 'border-green-500/20', pulse: false },
     { label: 'Not Confirmed', value: stats.notConfirmed, icon: XCircle, color: 'from-red-500 to-rose-500', bg: 'bg-red-500/10', border: 'border-red-500/20', pulse: false },
-    { label: 'Credit Exhausted', value: stats.creditExhausted || 0, icon: XCircle, color: 'from-orange-500 to-amber-500', bg: 'bg-orange-500/10', border: 'border-orange-500/20', pulse: false },
     { label: 'Total Calls', value: stats.totalCalls, icon: Phone, color: 'from-purple-500 to-violet-500', bg: 'bg-purple-500/10', border: 'border-purple-500/20', pulse: false },
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
       {cards.map((card) => (
         <div
           key={card.label}
