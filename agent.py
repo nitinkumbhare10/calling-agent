@@ -2,7 +2,7 @@ import os
 import certifi
 
 # Fix for macOS SSL Certificate errors - MUST be before other imports
-os.environ['SSL_CERT_FILE'] = certifi.where()
+# os.environ['SSL_CERT_FILE'] = certifi.where()
 
 import logging
 import json
@@ -235,7 +235,7 @@ class CallStateTools(llm.ToolContext):
             print(f"[STATE] _update_state_prompt error (non-fatal): {e}")
             logger.warning(f"State prompt update failed: {e}")
 
-    @llm.function_tool(description="Transition to the 'pitch' state. Call this ONLY AFTER: (1) agent has said 'Sir main WebCraft Solutions se baat kar raha hoon. Kya aapke paas ek minute ka samay hai?' AND (2) the customer has REPLIED with 'haan', 'theek hai', 'boliye', 'achha', 'hmm', or any listening/positive word to that question. Do NOT call this immediately after saying the intro line — wait for customer's response first.")
+    @llm.function_tool(description="Transition to the 'pitch' state. Call this ONLY AFTER: (1) agent has said 'main WebCraft Solutions se baat kar raha hoon. Kya aapke paas ek minute ka samay hai?' AND (2) the customer has REPLIED with 'haan', 'theek hai', 'boliye', 'achha', 'hmm', or any listening/positive word to that question. Do NOT call this immediately after saying the intro line — wait for customer's response first.")
     async def transition_state(self):
         import time
         print(f"[TRACE-STATE] transition_state CALLED at {time.strftime('%H:%M:%S')}")
@@ -270,7 +270,7 @@ class CallStateTools(llm.ToolContext):
         self.conv_manager.state = "confirmation_pending"
         self._update_state_prompt()
         print(f"[TRACE-STATE] State is now: {self.conv_manager.state}")
-        return "Sir confirm kar raha hoon, kya main demo website ki link WhatsApp par bhej doon?"
+        return "confirm kar raha hoon, kya main demo website ki link WhatsApp par bhej doon?"
 
     @llm.function_tool(description="""Finalize the booking. Call this ONLY after the customer says YES to your final confirmation question in the confirmation_pending state.
     IMPORTANT: DO NOT ask for WhatsApp number. We already have it. Just call this tool immediately when customer confirms.
@@ -331,8 +331,19 @@ class CallStateTools(llm.ToolContext):
         else:
             print(f"--- [TRACE-3 BOOKING] ⚠️ Dashboard NOT notified: url={self.dashboard_url}, lead_id={self.lead_id} ---")
         
+        # Send Telegram notification for booking
+        business_name = getattr(self.conv_manager, 'business_name', '') or 'Unknown'
+        telegram_text = (
+            f"🎉 *New Demo Booked!*\n\n"
+            f"📱 *Phone:* {self.phone_number or 'N/A'}\n"
+            f"🏢 *Business:* {business_name}\n"
+            f"🆔 *Lead ID:* {self.lead_id or 'N/A'}"
+        )
+        asyncio.ensure_future(_send_telegram_message(telegram_text))
+
+        
         # Speak farewell directly and then hang up — don't rely on LLM to re-generate
-        farewell = "Thank you sir, aapka demo schedule ho gaya hai. Hamari Team aapko contact karegi. Aapka din shubh ho."
+        farewell = "Thank You. hamari team apko whatsapp par aapke free demo website ki link bhej degi. Agle 1 ghante me apko link mil jayegi.. Aapka din shubh ho."
         if self.session and hasattr(self.session, 'say'):
             async def _say_and_hangup():
                 try:
@@ -340,10 +351,10 @@ class CallStateTools(llm.ToolContext):
                         await self.session.say(farewell, allow_interruptions=False)
                     else:
                         self.session.say(farewell, allow_interruptions=False)
-                    await asyncio.sleep(7.0)  # Let TTS finish speaking the long sentence
+                    await asyncio.sleep(11.0)  # Let TTS finish speaking the long sentence
                 except Exception as e:
                     print(f"[FAREWELL] say() error: {e}")
-                    await asyncio.sleep(7.0)
+                    await asyncio.sleep(11.0)
                 finally:
                     if getattr(self, 'egress_id', None):
                         await _stop_recording(self.egress_id)
@@ -373,9 +384,9 @@ class CallStateTools(llm.ToolContext):
                         await self.session.say(farewell, allow_interruptions=False)
                     else:
                         self.session.say(farewell, allow_interruptions=False)
-                    await asyncio.sleep(7.0)
+                    await asyncio.sleep(11.0)
                 except Exception as e:
-                    await asyncio.sleep(7.0)
+                    await asyncio.sleep(11.0)
                 finally:
                     if getattr(self, 'egress_id', None):
                         await _stop_recording(self.egress_id)
@@ -410,9 +421,9 @@ class CallStateTools(llm.ToolContext):
                         await self.session.say(farewell, allow_interruptions=False)
                     else:
                         self.session.say(farewell, allow_interruptions=False)
-                    await asyncio.sleep(7.0)
+                    await asyncio.sleep(11.0)
                 except Exception as e:
-                    await asyncio.sleep(7.0)
+                    await asyncio.sleep(11.0)
                 finally:
                     if getattr(self, 'egress_id', None):
                         await _stop_recording(self.egress_id)
@@ -434,9 +445,6 @@ class OutboundAssistant(Agent):
             tools=tools,
         )
 
-
-
-
 async def _notify_dashboard(dashboard_url: str, lead_id: str, status: str, duration: int = 0):
     """Notify the dashboard that a call has ended and update lead status."""
     if not dashboard_url or not lead_id:
@@ -454,6 +462,30 @@ async def _notify_dashboard(dashboard_url: str, lead_id: str, status: str, durat
     except Exception as e:
         logger.error(f"Failed to notify dashboard: {e}")
 
+
+async def _send_telegram_message(text: str):
+    """Send a notification message via Telegram Bot API."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        logger.info("[TELEGRAM] Missing bot token or chat ID. Notification skipped.")
+        return
+    
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code == 200:
+                logger.info(f"[TELEGRAM] Message sent successfully: {text}")
+            else:
+                logger.error(f"[TELEGRAM] Failed to send message: {resp.status_code} {resp.text}")
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error sending message: {e}")
 
 async def _start_recording(ctx: agents.JobContext, phone_number: str, lead_id: str = None) -> str | None:
     """

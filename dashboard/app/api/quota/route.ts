@@ -1,5 +1,62 @@
 import { NextResponse } from 'next/server';
 import { roomService, sipClient } from '@/lib/server-utils';
+import fs from 'fs';
+import path from 'path';
+
+const STATE_FILE_PATH = path.join(process.cwd(), 'quota_state.json');
+
+interface QuotaState {
+  lastNotified: Record<string, 'ok' | 'error' | 'quota_exceeded' | 'checking'>;
+}
+
+function readQuotaState(): QuotaState {
+  try {
+    if (fs.existsSync(STATE_FILE_PATH)) {
+      const data = fs.readFileSync(STATE_FILE_PATH, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.error('Failed to read quota state:', e);
+  }
+  return { lastNotified: {} };
+}
+
+function writeQuotaState(state: QuotaState) {
+  try {
+    fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(state, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to write quota state:', e);
+  }
+}
+
+async function sendTelegramMessage(text: string) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) {
+    console.log('[TELEGRAM] Missing token or chat ID. Notification skipped.');
+    return;
+  }
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'Markdown',
+      }),
+    });
+    if (!res.ok) {
+      console.error('[TELEGRAM] Failed to send message:', await res.text());
+    } else {
+      console.log('[TELEGRAM] Quota alert sent successfully');
+    }
+  } catch (e) {
+    console.error('[TELEGRAM] Error sending Telegram message:', e);
+  }
+}
+
 
 interface ServiceStatus {
   name: string;
@@ -156,6 +213,43 @@ export async function GET() {
 
   const services = [cartesia, deepgram, groq, sarvam, livekit, vobiz];
   const hasIssue = services.some(s => s.status !== 'ok');
+
+  // TELEGRAM NOTIFICATION SYSTEM FOR QUOTA EXHAUSTED/RESTORED
+  try {
+    const state = readQuotaState();
+    let stateChanged = false;
+
+    for (const service of services) {
+      const prevStatus = state.lastNotified[service.name];
+      const newStatus = service.status;
+
+      // If status changed to quota_exceeded
+      if (newStatus === 'quota_exceeded' && prevStatus !== 'quota_exceeded') {
+        const msg = `⚠️ *Quota Alert!*\n\n*Service:* ${service.name}\n*Status:* Quota Exceeded\n*Message:* ${service.message}`;
+        await sendTelegramMessage(msg);
+        state.lastNotified[service.name] = 'quota_exceeded';
+        stateChanged = true;
+      }
+      // If status transitioned back to ok from quota_exceeded (recovery)
+      else if (newStatus === 'ok' && prevStatus === 'quota_exceeded') {
+        const msg = `✅ *Quota Restored!*\n\n*Service:* ${service.name}\n*Status:* OK\n*Message:* Service is active again.`;
+        await sendTelegramMessage(msg);
+        state.lastNotified[service.name] = 'ok';
+        stateChanged = true;
+      }
+      // Initialize or update state if it is not set (so we track transitions from undefined or other statuses)
+      else if (prevStatus === undefined || (newStatus === 'ok' && prevStatus !== 'ok' && prevStatus !== 'quota_exceeded')) {
+        state.lastNotified[service.name] = newStatus;
+        stateChanged = true;
+      }
+    }
+
+    if (stateChanged) {
+      writeQuotaState(state);
+    }
+  } catch (e) {
+    console.error('Telegram notification quota check failed:', e);
+  }
 
   return NextResponse.json({
     services,
