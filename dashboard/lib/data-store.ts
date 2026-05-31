@@ -13,7 +13,7 @@ export interface Lead {
   id: string;
   businessName: string;
   phoneNumber: string;
-  status: 'pending' | 'calling' | 'on_call' | 'demo_confirmed' | 'not_confirmed' | 'no_answer' | 'callback';
+  status: 'pending' | 'calling' | 'on_call' | 'demo_confirmed' | 'not_confirmed' | 'no_answer' | 'callback' | 'credit_exhausted';
   callDate: string | null;
   notes: string;
   campaignId: string;
@@ -176,6 +176,29 @@ export function getStats() {
     notConfirmed: leads.filter(l => l.status === 'not_confirmed').length,
     noAnswer: leads.filter(l => l.status === 'no_answer').length,
     callback: leads.filter(l => l.status === 'callback').length,
+    creditExhausted: leads.filter(l => l.status === 'credit_exhausted').length,
     totalCalls: calls.length,
   };
+}
+
+// --- Settings ---
+export interface Settings {
+  autoCallNextLead: boolean;
+}
+
+export function getSettings(): Settings {
+  const settings = readJSON<Settings>('settings.json');
+  if (settings.length === 0) {
+    const defaultSettings: Settings = { autoCallNextLead: false };
+    writeJSON('settings.json', [defaultSettings]);
+    return defaultSettings;
+  }
+  return settings[0];
+}
+
+export function updateSettings(updates: Partial<Settings>): Settings {
+  const current = getSettings();
+  const updated = { ...current, ...updates };
+  writeJSON('settings.json', [updated]);
+  return updated;
 }

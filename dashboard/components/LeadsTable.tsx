@@ -26,6 +26,7 @@ const STATUS_CONFIG: Record<string, { label: string; icon: any; color: string; b
   not_confirmed: { label: 'Not Confirmed', icon: XCircle, color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20' },
   no_answer: { label: 'No Answer', icon: PhoneOff, color: 'text-gray-400', bg: 'bg-gray-500/10 border-gray-500/20' },
   callback: { label: 'Callback', icon: Phone, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' },
+  credit_exhausted: { label: 'Credit Exhausted', icon: XCircle, color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/20' },
 };
 
 export default function LeadsTable({ leads, onRefresh, onCallLead }: LeadsTableProps) {
@@ -99,6 +100,7 @@ export default function LeadsTable({ leads, onRefresh, onCallLead }: LeadsTableP
           <option value="not_confirmed">Not Confirmed</option>
           <option value="no_answer">No Answer</option>
           <option value="callback">Callback</option>
+          <option value="credit_exhausted">Credit Exhausted</option>
         </select>
         <button
           onClick={downloadCSV}

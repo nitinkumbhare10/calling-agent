@@ -28,6 +28,7 @@ interface Stats {
   notConfirmed: number;
   noAnswer: number;
   callback: number;
+  creditExhausted?: number;
   totalCalls: number;
 }
 
@@ -40,7 +41,7 @@ const TABS = [
 
 const DEFAULT_STATS: Stats = {
   totalLeads: 0, pending: 0, calling: 0, onCall: 0, demoConfirmed: 0,
-  notConfirmed: 0, noAnswer: 0, callback: 0, totalCalls: 0,
+  notConfirmed: 0, noAnswer: 0, callback: 0, creditExhausted: 0, totalCalls: 0,
 };
 
 export default function Home() {
@@ -48,7 +49,7 @@ export default function Home() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [stats, setStats] = useState<Stats>(DEFAULT_STATS);
   const [loading, setLoading] = useState(true);
-
+  const [autoCallNextLead, setAutoCallNextLead] = useState(false);
 
   const fetchLeads = useCallback(async () => {
     try {
@@ -63,16 +64,45 @@ export default function Home() {
     }
   }, []);
 
+  const fetchSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      setAutoCallNextLead(data.autoCallNextLead || false);
+    } catch (err) {
+      console.error('Failed to fetch settings:', err);
+    }
+  }, []);
+
+  const handleToggleAutoCall = async () => {
+    try {
+      const targetState = !autoCallNextLead;
+      setAutoCallNextLead(targetState);
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoCallNextLead: targetState }),
+      });
+      const data = await res.json();
+      setAutoCallNextLead(data.autoCallNextLead || false);
+      fetchLeads();
+    } catch (err) {
+      console.error('Failed to update settings:', err);
+    }
+  };
+
   useEffect(() => {
     fetchLeads();
+    fetchSettings();
     // Auto-poll every 10 seconds to catch status updates from agent callbacks
     const interval = setInterval(async () => {
       // Also trigger sync-status to fix stale "calling" leads
       try { await fetch('/api/leads/sync-status', { method: 'POST' }); } catch {}
       fetchLeads();
+      fetchSettings();
     }, 10000);
     return () => clearInterval(interval);
-  }, [fetchLeads]);
+  }, [fetchLeads, fetchSettings]);
 
   const handleCallLead = async (lead: Lead) => {
     try {
@@ -149,7 +179,24 @@ export default function Home() {
               <span className="text-green-400">Agent Online</span>
             </div>
 
-
+            {/* Auto Calling Toggle */}
+            <button
+              onClick={handleToggleAutoCall}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-all duration-300 ${
+                autoCallNextLead
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25 shadow-[0_0_15px_rgba(16,185,129,0.15)]'
+                  : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10 hover:text-white'
+              }`}
+              title="Toggle automatic next-lead calling"
+            >
+              <span className="relative flex h-2 w-2">
+                {autoCallNextLead && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${autoCallNextLead ? 'bg-emerald-500' : 'bg-gray-500'}`}></span>
+              </span>
+              <span>Auto Dialing: {autoCallNextLead ? 'ON' : 'OFF'}</span>
+            </button>
 
             <button
               onClick={() => fetchLeads()}

@@ -1153,8 +1153,16 @@ async def entrypoint(ctx: agents.JobContext):
         except Exception as e:
             logger.error(f"Failed to place outbound call: {e}")
             _log_trace(f"[TRACE-14 SIP DIAL] 🚨 Failed to place outbound call! Error: {e}")
-            # Call failed - update status to no_answer
-            await _notify_dashboard(dashboard_url, lead_id, "no_answer")
+            
+            # Check if Vobiz credit is exhausted (SIP error 402 / Payment Required)
+            error_str = str(e)
+            status = "no_answer"
+            if "payment required" in error_str.lower() or "402" in error_str:
+                status = "credit_exhausted"
+                _log_trace(f"[TRACE-14 SIP DIAL] 🚨 Vobiz credit exhausted detected (SIP status 'Payment Required').")
+            
+            # Call failed - update status on dashboard
+            await _notify_dashboard(dashboard_url, lead_id, status)
             ctx.shutdown()
     else:
         # Fallback for inbound calls (if this agent is used for that) OR Dashboard calls where user is already there
