@@ -2,14 +2,12 @@ import os
 import certifi
 
 # Fix for macOS SSL Certificate errors - MUST be before other imports
-# os.environ['SSL_CERT_FILE'] = certifi.where()
+os.environ['SSL_CERT_FILE'] = certifi.where()
 
 import logging
 import json
 import asyncio
 import httpx
-import gzip
-import msgpack
 from dotenv import load_dotenv
 
 from livekit import agents, api
@@ -324,10 +322,7 @@ class CallStateTools(llm.ToolContext):
                         url = f"{self.dashboard_url}/api/leads/{self.lead_id}"
                         payload = {"status": "demo_confirmed", "whatsapp_number": wa_number}
                         print(f"--- [TRACE-3 BOOKING] PATCH URL: {url}, Payload: {payload} ---")
-                        msgpack_payload = msgpack.packb(payload)
-                        compressed_payload = gzip.compress(msgpack_payload)
-                        headers = {"Content-Type": "application/msgpack", "Content-Encoding": "gzip"}
-                        resp = await client.patch(url, content=compressed_payload, headers=headers)
+                        resp = await client.patch(url, json=payload)
                         print(f"--- [TRACE-3 BOOKING] Dashboard response: {resp.status_code} ---")
                 asyncio.ensure_future(_update_demo())
             except Exception as e:
@@ -414,10 +409,7 @@ class CallStateTools(llm.ToolContext):
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         url = f"{self.dashboard_url}/api/leads/{self.lead_id}"
                         payload = {"status": "callback_requested", "notes": f"Callback preference: {time_preference}"}
-                        msgpack_payload = msgpack.packb(payload)
-                        compressed_payload = gzip.compress(msgpack_payload)
-                        headers = {"Content-Type": "application/msgpack", "Content-Encoding": "gzip"}
-                        await client.patch(url, content=compressed_payload, headers=headers)
+                        await client.patch(url, json=payload)
                 asyncio.ensure_future(_update_callback())
             except Exception as e:
                 pass
@@ -465,10 +457,7 @@ async def _notify_dashboard(dashboard_url: str, lead_id: str, status: str, durat
             url = f"{dashboard_url}/api/leads/{lead_id}"
             payload = {"status": status}
             logger.info(f"Notifying dashboard: {url} -> {status}")
-            msgpack_payload = msgpack.packb(payload)
-            compressed_payload = gzip.compress(msgpack_payload)
-            headers = {"Content-Type": "application/msgpack", "Content-Encoding": "gzip"}
-            resp = await client.patch(url, content=compressed_payload, headers=headers)
+            resp = await client.patch(url, json=payload)
             logger.info(f"Dashboard response: {resp.status_code}")
     except Exception as e:
         logger.error(f"Failed to notify dashboard: {e}")

@@ -1,5 +1,6 @@
 [
   {
-    "autoCallNextLead": false
+    "autoCallNextLead": false,
+    "autoDialEndTime": null
   }
 ]

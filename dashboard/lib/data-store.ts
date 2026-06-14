@@ -183,12 +183,13 @@ export function getStats() {
 // --- Settings ---
 export interface Settings {
   autoCallNextLead: boolean;
+  autoDialEndTime?: number | null;
 }
 
 export function getSettings(): Settings {
   const settings = readJSON<Settings>('settings.json');
   if (settings.length === 0) {
-    const defaultSettings: Settings = { autoCallNextLead: false };
+    const defaultSettings: Settings = { autoCallNextLead: false, autoDialEndTime: null };
     writeJSON('settings.json', [defaultSettings]);
     return defaultSettings;
   }

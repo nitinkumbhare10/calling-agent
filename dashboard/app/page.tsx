@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { LayoutDashboard, Users, Phone, Settings, Upload, Sparkles, RefreshCw, Trash2 } from 'lucide-react';
+import { LayoutDashboard, Users, Phone, Settings, Upload, Sparkles, RefreshCw, Trash2, X, Clock } from 'lucide-react';
 import StatsCards from '@/components/StatsCards';
 import CSVUploader from '@/components/CSVUploader';
 import LeadsTable from '@/components/LeadsTable';
@@ -50,6 +50,9 @@ export default function Home() {
   const [stats, setStats] = useState<Stats>(DEFAULT_STATS);
   const [loading, setLoading] = useState(true);
   const [autoCallNextLead, setAutoCallNextLead] = useState(false);
+  const [autoDialEndTime, setAutoDialEndTime] = useState<number | null>(null);
+  const [showDurationModal, setShowDurationModal] = useState(false);
+  const [customDuration, setCustomDuration] = useState("");
 
   const fetchLeads = useCallback(async () => {
     try {
@@ -69,26 +72,68 @@ export default function Home() {
       const res = await fetch('/api/settings');
       const data = await res.json();
       setAutoCallNextLead(data.autoCallNextLead || false);
+      setAutoDialEndTime(data.autoDialEndTime || null);
     } catch (err) {
       console.error('Failed to fetch settings:', err);
     }
   }, []);
 
   const handleToggleAutoCall = async () => {
+    if (!autoCallNextLead) {
+      setShowDurationModal(true);
+      return;
+    }
+    
     try {
-      const targetState = !autoCallNextLead;
+      const targetState = false;
       setAutoCallNextLead(targetState);
       const res = await fetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ autoCallNextLead: targetState }),
+        body: JSON.stringify({ autoCallNextLead: targetState, autoDialEndTime: null }),
       });
       const data = await res.json();
       setAutoCallNextLead(data.autoCallNextLead || false);
+      setAutoDialEndTime(null);
       fetchLeads();
     } catch (err) {
       console.error('Failed to update settings:', err);
     }
+  };
+
+  const handleStartAutoDial = async (durationMinutes: number | null) => {
+    try {
+      setShowDurationModal(false);
+      const endTime = durationMinutes ? Date.now() + durationMinutes * 60000 : null;
+      setAutoCallNextLead(true);
+      setAutoDialEndTime(endTime);
+      
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoCallNextLead: true, autoDialEndTime: endTime }),
+      });
+      const data = await res.json();
+      setAutoCallNextLead(data.autoCallNextLead || false);
+      setAutoDialEndTime(data.autoDialEndTime || null);
+      fetchLeads();
+    } catch (err) {
+      console.error('Failed to start auto-dialing:', err);
+    }
+  };
+
+  const getAutoDialButtonText = () => {
+    if (!autoCallNextLead) return 'OFF';
+    if (!autoDialEndTime) return 'ON';
+    const remainingMs = autoDialEndTime - Date.now();
+    if (remainingMs <= 0) return 'OFF';
+    const mins = Math.ceil(remainingMs / 60000);
+    if (mins > 60) {
+      const hrs = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `ON (${hrs}h ${m}m)`;
+    }
+    return `ON (${mins}m)`;
   };
 
   useEffect(() => {
@@ -195,7 +240,7 @@ export default function Home() {
                 )}
                 <span className={`relative inline-flex rounded-full h-2 w-2 ${autoCallNextLead ? 'bg-emerald-500' : 'bg-gray-500'}`}></span>
               </span>
-              <span>Auto Dialing: {autoCallNextLead ? 'ON' : 'OFF'}</span>
+              <span>Auto Dialing: {getAutoDialButtonText()}</span>
             </button>
 
             <button
@@ -356,6 +401,71 @@ export default function Home() {
           </p>
         </div>
       </footer>
+      {/* Duration Modal */}
+      {showDurationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-[#121212] border border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Clock className="w-5 h-5 text-blue-400" />
+                Auto-Dial Duration
+              </h3>
+              <button 
+                onClick={() => setShowDurationModal(false)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <p className="text-sm text-gray-400 mb-4">
+              How long should the agent keep dialing leads?
+            </p>
+            
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: '15 Mins', value: 15 },
+                { label: '30 Mins', value: 30 },
+                { label: '1 Hour', value: 60 },
+                { label: '2 Hours', value: 120 },
+                { label: '4 Hours', value: 240 },
+                { label: 'Unlimited', value: null },
+              ].map((option, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleStartAutoDial(option.value)}
+                  className="px-4 py-3 rounded-xl border border-white/5 bg-white/5 hover:bg-blue-500/20 hover:border-blue-500/40 hover:text-blue-400 text-sm font-medium transition-all duration-200"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <input
+                type="number"
+                min="1"
+                placeholder="Custom (minutes)..."
+                value={customDuration}
+                onChange={(e) => setCustomDuration(e.target.value)}
+                className="flex-1 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder:text-gray-500 focus:outline-none focus:border-blue-500/50 transition-colors"
+              />
+              <button
+                onClick={() => {
+                  const val = parseInt(customDuration, 10);
+                  if (!isNaN(val) && val > 0) {
+                    handleStartAutoDial(val);
+                  }
+                }}
+                disabled={!customDuration || isNaN(parseInt(customDuration, 10)) || parseInt(customDuration, 10) <= 0}
+                className="px-4 py-2 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Set
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

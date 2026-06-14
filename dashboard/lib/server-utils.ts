@@ -12,7 +12,7 @@ export const roomService = new RoomServiceClient(LIVEKIT_URL, LIVEKIT_API_KEY, L
 export const sipClient = new SipClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 export const agentDispatchClient = new AgentDispatchClient(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
 
-import { getLeads, updateLead, getSettings, addCallLog } from './data-store';
+import { getLeads, updateLead, getSettings, addCallLog, updateSettings } from './data-store';
 
 export async function autoCallNext(host: string) {
   try {
@@ -20,6 +20,12 @@ export async function autoCallNext(host: string) {
     const settings = getSettings();
     if (!settings.autoCallNextLead) {
       console.log("[AUTO CALL] Auto-call is disabled. Aborting.");
+      return;
+    }
+
+    if (settings.autoDialEndTime && Date.now() > settings.autoDialEndTime) {
+      console.log("[AUTO CALL] Auto-call duration has expired. Disabling auto-call.");
+      updateSettings({ autoCallNextLead: false, autoDialEndTime: null });
       return;
     }
 
